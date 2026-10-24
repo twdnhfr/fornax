@@ -93,10 +93,15 @@ defineCommand({
     const cert = site.tlsIssuer === "none" ? "" : Bun.spawnSync(["bash", "-c", `openssl s_client -connect ${addr}:443 -servername ${site.domain} 2>/dev/null | openssl x509 -noout -issuer -enddate -ext subjectAltName 2>/dev/null`], { stdin: "ignore", timeout: 15_000 }).stdout.toString();
     const issuer = cert.match(/issuer=.*?(?:O\s*=\s*([^,\n]+))?.*?CN\s*=\s*([^\n]+)/)?.slice(1).filter(Boolean).join(" / ") ?? null;
     const expires = cert.match(/notAfter=(.*)/)?.[1] ?? null;
+    const names = cert.match(/Subject Alternative Name:[^\n]*\n\s*([^\n]+)/)?.[1]?.split(",").map((n) => n.trim().replace(/^DNS:/, "")) ?? [];
+    // --verbose: how long each answer took, every name the certificate covers, and which it misses
+    const missing = names.length ? site.names.filter((n) => !names.includes(n) && !names.includes(n.replace(/^[^.]+/, "*"))) : [];
     const human = [
-      ...results.map((r) => `${String(r.status ?? "ERR").padEnd(4)} ${r.url}${r.redirect ? ` → ${r.redirect}` : ""}${r.error ? ` — ${r.error}` : ""}${r.body !== undefined ? `\n     ${r.body.replace(/\s+/g, " ").trim() || "(empty)"}` : ""}`),
+      ...results.map((r) => `${String(r.status ?? "ERR").padEnd(4)} ${r.url}${ctx.verbose && r.status ? ` (${r.seconds.toFixed(2)}s)` : ""}${r.redirect ? ` → ${r.redirect}` : ""}${r.error ? ` — ${r.error}` : ""}${r.body !== undefined ? `\n     ${r.body.replace(/\s+/g, " ").trim() || "(empty)"}` : ""}`),
       site.tlsIssuer === "none" ? "certificate: none (tls: none, HTTP only)" : `certificate: ${issuer ?? "none"}${expires ? `, until ${expires}` : ""}`,
+      ...(ctx.verbose && names.length ? [`  covers: ${names.join(", ")}`] : []),
+      ...(missing.length ? [`  ! does not cover: ${missing.join(", ")}`] : []),
     ].join("\n");
-    return { data: { site: site.domain, via: addr, results, certificate: { issuer, expires } }, human, exitCode: results.some((r) => !r.status || r.status >= 500) ? 1 : 0 };
+    return { data: { site: site.domain, via: addr, results, certificate: { issuer, expires, names, missing } }, human, exitCode: results.some((r) => !r.status || r.status >= 500) ? 1 : 0 };
   },
 });

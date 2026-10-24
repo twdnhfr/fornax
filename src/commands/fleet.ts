@@ -126,7 +126,7 @@ defineCommand({
     }
     const conventions = [
       "Run fornax inside a fleet repo (the directory with fornax.yaml), pass --fleet <dir>, or set $FORNAX_FLEET. Read commands fall back to ~/.config/fornax/fleet when it exists; write and destroy commands never do (error implicit_fleet) and name the fleet they change on stderr.",
-      "First setup of a server: `fornax server add` → `fornax server bootstrap` → `fornax site add` → `fornax server provision` (plans and applies everything in one go; --dry-run shows the plan) → `fornax deploy <site>`. bootstrap and provision are for a new server only; after that, every change: `site add` / `site set` / `server set` (or an edit of the YAML) → `fornax plan` → `fornax apply`.",
+      "First setup of a server: `fornax server add` → `fornax server bootstrap` → `fornax site add` → `fornax server provision` (plans and applies everything in one go; --dry-run shows the plan) → `fornax deploy <site>` (the first deploy; `fornax git connect <site>` adds push-to-deploy for GitHub repos — not needed for `fornax deploy`). bootstrap and provision are for a new server only; after that, every change: `site add` / `site set` / `server set` (or an edit of the YAML) → `fornax plan` → `fornax apply`.",
       "Tiers: read = safe to run any time; write = changes servers/APIs/config, ask the human first; destroy = also needs --confirm=<name>.",
       "Change servers in two steps: `fornax plan <server>` (read, prints a plan id) then `fornax apply <plan-id>` (write). Never edit managed files on a server by hand — edit the fleet repo.",
       "fornax logs in with SSH as ssh.user (default root) and the fleet's key: `fornax server add` prints the login; --ssh-user/--ssh-port or `fornax server set` change it.",

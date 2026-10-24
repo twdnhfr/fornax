@@ -113,10 +113,11 @@ defineCommand({
       throw e;
     }
     const s = getServer(after, server.server);
-    const dropped = server.services.filter((x) => !s.services.includes(x));
+    // a server not set up yet has nothing installed that could stay behind
+    const fresh = !everPlannedWhole(after, s.server);
+    const dropped = fresh ? [] : server.services.filter((x) => !s.services.includes(x));
     const notes = dropped.length ? [`${dropped.join(", ")} stay installed where they already run: fornax manages what the config names, and does not remove a service with its data`] : [];
     // a server not set up yet gets it all in one go; afterwards a change is planned and applied
-    const fresh = !everPlannedWhole(after, s.server);
     const next = fresh ? `fornax server provision ${s.server}` : `fornax plan ${s.server}`;
     return {
       data: { server: s.server, file: path, changed, login: loginLine(after, s), notes, next },

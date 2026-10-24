@@ -54,6 +54,7 @@ export const HANDLERS: Record<string, Handler> = {
   mysql: { reload: "systemctl restart mysql" },
   postgres: { reload: "systemctl reload postgresql" },
   redis: { reload: "systemctl restart redis-server" },
+  memcached: { reload: "systemctl restart memcached" },
   fail2ban: { reload: "systemctl reload-or-restart fail2ban" },
   crowdsec: { validate: "crowdsec -t >/dev/null 2>&1 || true", reload: "systemctl reload-or-restart crowdsec" },
   journald: { reload: "systemctl restart systemd-journald" },

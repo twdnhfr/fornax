@@ -423,7 +423,15 @@ printf 'requirepass %s\\n' "$(cat ${SECRETS}/redis)" > /etc/redis/fornax-auth.co
     }
     r.push(service("redis-server", o));
   }
-  if (s.services.includes("memcached")) r.push(packages("memcached", ["memcached"], o), service("memcached", o));
+  if (s.services.includes("memcached")) {
+    // like MySQL and Redis: only this machine — the package listens on every address some panels set
+    const listens = `grep -E '^-l ' /etc/memcached.conf | tr -s ' ' | LC_ALL=C sort | tr '\\n' ';'`;
+    r.push(packages("memcached", ["memcached"], o), {
+      ...check("memcached-bind", "memcached on 127.0.0.1 and ::1 only", "true", `sed -i '/^-l /d' /etc/memcached.conf; printf -- '-l 127.0.0.1\\n-l ::1\\n' >> /etc/memcached.conf`, { ...o, handler: "memcached" }),
+      probe: listens,
+      desired: "-l 127.0.0.1;-l ::1;",
+    }, service("memcached", o));
+  }
   if (s.services.includes("supervisor")) r.push(packages("supervisor", ["supervisor"], o), service("supervisor", o));
   return r;
 }

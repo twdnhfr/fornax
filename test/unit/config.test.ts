@@ -91,6 +91,15 @@ describe("fleet config", () => {
     expect(after.config.notify.webhook).toBe("https://hooks.example.com/x");
   });
 
+  test("commands that edit an older config work on it as written, without upgrading it", async () => {
+    const dir = fleet({ "fornax.yaml": "version: 1\nfleet: t\n", "servers/web-1.yaml": "server: web-1\nhost: 203.0.113.10\nhook_domain: hook.example.com\nsites: {}\n" });
+    expect(await main(["site", "add", "web-1", "shop.example.com", "--fleet", dir, "--json"])).toBe(0);
+    const text = readFileSync(join(dir, "servers/web-1.yaml"), "utf8");
+    expect(text).toContain("hook_domain: hook.example.com");
+    expect(text).toContain("shop.example.com");
+    expect(loadFleet({ cwd: dir }).servers.get("web-1")!.webhook).toMatchObject({ domain: "hook.example.com" });
+  });
+
   test("a config newer than this fornax is refused", () => {
     expect(loadError(fleet({ "fornax.yaml": "version: 99\nfleet: t\n" })).code).toBe("config_too_new");
   });

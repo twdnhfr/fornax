@@ -358,7 +358,11 @@ export function editServerFile(fleet: Fleet, server: string, edit: (doc: YAML.Do
     },
   });
   const out = doc.toString();
-  const res = ServerSchema.safeParse(YAML.parse(out));
+  // a fleet of an older config version is checked as it loads: upgraded in memory, written as it was
+  const check = YAML.parseDocument(out);
+  const version = configVersion(readDoc(fleetFile(fleet.dir)!), path!);
+  if (version < CONFIG_VERSION) upgradeDoc(check, version, "server");
+  const res = ServerSchema.safeParse(check.toJS());
   if (!res.success) fail("config_invalid", `edit would make ${path} invalid: ${res.error.issues.map((i) => i.message).join("; ")}`);
   writeFileSync(path!, out);
   return path!;

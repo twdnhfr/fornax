@@ -1,0 +1,4 @@
+{"data":[
+{"id":"400","type":"scheduledJobs","attributes":{"name":"","command":"php8.4 /home/shop-ab12cd34/shop.example.com/current/artisan schedule:run","user":"shop-ab12cd34","frequency":"Minutely","cron":"* * * * *"}},
+{"id":"401","type":"scheduledJobs","attributes":{"name":"","command":"/usr/local/bin/composer self-update","user":"root","frequency":"Custom","cron":"8 8 * * *"}}
+]}

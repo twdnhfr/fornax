@@ -1,0 +1,1 @@
+{"data":{"id":"100","type":"servers","attributes":{"id":100,"name":"old-forge","type":"app","ubuntu_version":"24.04","ssh_port":22,"provider":"hetzner","identifier":"55501","size":"cax21","region":"Nuremberg","php_version":"php84","database_type":"mysql8","ip_address":"203.0.113.50","private_ip_address":"10.0.0.2","timezone":"UTC","is_ready":true}}}

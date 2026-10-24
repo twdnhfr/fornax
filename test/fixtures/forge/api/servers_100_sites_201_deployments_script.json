@@ -1,0 +1,1 @@
+{"data": {"id": "201", "type": "deploymentScripts", "attributes": {"content": "cd $FORGE_SITE_PATH\ngit pull origin $FORGE_SITE_BRANCH\n$FORGE_PHP build.php\n", "auto_source": false}}}

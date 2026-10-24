@@ -1,0 +1,32 @@
+server: web-1
+host: 203.0.113.10
+public_ipv4: 203.0.113.10
+provider:
+  type: hetzner-cloud
+  id: "12345678"
+php: ["8.4", "8.5"]
+services: [mysql, postgres, redis, supervisor, fail2ban]
+tools: [composer, bun]
+swap: 2G
+webhook: { domain: hooks.example.com }
+
+sites:
+  shop.example.com:
+    repo: acme/shop
+    php: "8.5"
+    aliases: [shop.example.net]
+    www_redirect: true
+    db: { engine: postgres, extensions: [vector] }
+    schedule: true
+    daemons:
+      - cmd: php8.5 artisan horizon
+        stopwait: 3600
+    health_check: /up
+    nginx:
+      server: [snippets/shop.example.com/cache-assets.conf]
+    notes: Customer-facing; deploy only from main.
+
+  docs.example.com:
+    repo: acme/docs
+    preset: static
+    web_dir: dist

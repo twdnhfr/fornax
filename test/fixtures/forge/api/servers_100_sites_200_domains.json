@@ -1,0 +1,1 @@
+{"data":[{"id":"600","type":"domains","attributes":{"name":"shop.example.com","type":"primary","status":"enabled","www_redirect_type":"from-www"}},{"id":"601","type":"domains","attributes":{"name":"shop.example.net","type":"alias","status":"enabled","www_redirect_type":"none"}}]}

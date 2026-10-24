@@ -1,0 +1,45 @@
+# Example fleet. Copy this directory into its own (private) git repo.
+version: 2
+fleet: acme
+access: ssh            # or tailscale
+
+ssh:
+  user: root
+  # identity_file: ~/.ssh/id_ed25519
+  authorized_keys: []   # extra public keys that may log in as root
+
+policies:
+  allowed_repo_owners: [acme]
+  protected: [shop.example.com]
+  # maintenance_window: "02:00-04:00"   # UTC; server changes only, app deploys are not restricted
+
+tls:
+  issuer: letsencrypt
+  email: ops@example.com
+
+dns:
+  type: cloudflare
+  credentials: op://Infra/Cloudflare/token
+
+provider_credentials:
+  hetzner-cloud: op://Infra/Hetzner/token
+
+onepassword:
+  vault: Infra
+  # account: my.1password.com
+
+backup:
+  storage_box:
+    host: u123456.your-storagebox.de
+    user: u123456-sub1
+    password: op://Infra/Storage Box/password
+  at: "03:15"
+  # heartbeat: op://Infra/healthchecks/backup-url
+
+notify:
+  ntfy:                                   # push for failed / rolled-back deploys (`fornax notify test <site>`)
+    url: https://ntfy.sh/acme-deploys-x7k2q9   # pick an unguessable topic; subscribe to it in the ntfy app
+    email: ops@example.com                # ntfy forwards each message as mail too
+  # on: always                            # also report successful deploys
+  # url: https://hooks.example.com/fornax  # JSON event for every deploy
+  github_status: false

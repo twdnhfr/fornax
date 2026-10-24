@@ -1,0 +1,10 @@
+/home/shop-ab12cd34/shop.example.com/storage/logs/*.log {
+    su shop-ab12cd34 shop-ab12cd34
+    weekly
+    maxsize 100M
+    missingok
+    rotate 2
+    compress
+    notifempty
+    create 755 shop-ab12cd34 shop-ab12cd34
+}

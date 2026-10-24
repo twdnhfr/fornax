@@ -1,0 +1,4 @@
+{"data":[
+{"id":"200","type":"sites","attributes":{"name":"shop.example.com","status":"installed","user":"shop-ab12cd34","https":true,"web_directory":"/home/shop-ab12cd34/shop.example.com/current/public","root_directory":"/","php_version":"PHP 8.4","repository":{"provider":"GitHub","url":"https://github.com/acme/shop","branch":"main","status":"installed"},"zero_downtime_deployments":true,"deployment_retention":4,"app_type":"laravel","healthcheck_url":null,"shared_paths":[]}},
+{"id":"201","type":"sites","attributes":{"name":"docs.example.com","status":"installed","user":"docs","https":true,"web_directory":"/home/docs/docs.example.com/dist","root_directory":"/","php_version":"PHP 8.4","repository":{"provider":"GitHub","url":"https://github.com/acme/docs","branch":"main","status":"installed"},"zero_downtime_deployments":false,"deployment_retention":4,"app_type":"static-html","healthcheck_url":null,"shared_paths":[]}}
+]}

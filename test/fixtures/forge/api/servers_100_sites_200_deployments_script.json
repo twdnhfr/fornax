@@ -1,0 +1,1 @@
+{"data":{"id":"200","type":"deploymentScripts","attributes":{"content":"$CREATE_RELEASE()\n\ncd $FORGE_RELEASE_DIRECTORY\n\n$FORGE_COMPOSER install --no-dev --no-interaction --prefer-dist --optimize-autoloader\n$FORGE_PHP artisan optimize\n$FORGE_PHP artisan migrate --force\n\n$ACTIVATE_RELEASE()\n\n$RESTART_QUEUES()\n","auto_source":false}}}

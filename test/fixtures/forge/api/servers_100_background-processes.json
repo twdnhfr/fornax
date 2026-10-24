@@ -1,0 +1,1 @@
+{"data":[{"id":"300","type":"backgroundProcesses","attributes":{"command":"php8.4 artisan horizon","user":"shop-ab12cd34","directory":"/home/shop-ab12cd34/shop.example.com/current/","processes":1,"status":"installed"}}]}

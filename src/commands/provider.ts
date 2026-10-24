@@ -294,16 +294,21 @@ defineCommand({
     // out of the tailnet, so no dead machine stays behind in the Tailscale admin (best effort):
     // with the API the device is removed, without it the server at least logs itself out
     let leftTailnet = false;
+    // deleted in the provider's panel already: what is left is the cleanup (tailnet, host keys, fleet, 1Password)
+    const gone = await p.get(String(server.provider.id)).then(
+      () => false,
+      (e) => (e as FornaxError).code === "provider_not_found",
+    );
     const ts = fleet.config.access === "tailscale" ? await tailscaleApi(fleet) : undefined;
     const device = ts ? await ts.device(server.host).catch(() => undefined) : undefined;
-    if (fleet.config.access === "tailscale" && !device) {
+    if (fleet.config.access === "tailscale" && !device && !gone) {
       // (delayed: the logout cuts the Tailscale SSH session it was started from)
       try {
         leftTailnet = (await runnerFor(fleet, server).run("systemd-run --quiet --on-active=2 tailscale logout", { timeoutMs: 20_000, allowFail: true })).code === 0;
         if (leftTailnet) await Bun.sleep(6000);
       } catch {}
     }
-    await p.destroy!(String(server.provider.id));
+    if (!gone) await p.destroy!(String(server.provider.id));
     // its names and addresses will belong to other servers one day: no stale host keys left behind
     forgetHostKeys(fleet, [server.host, ...(server.public_ipv4 ? [server.public_ipv4] : []), ...(server.public_ipv6 ? [server.public_ipv6] : [])]);
     if (device) {
@@ -330,7 +335,7 @@ defineCommand({
     const warn = secrets?.error ? `\nwarning: could not archive op://${secrets.item} (${secrets.error}) — archive it in 1Password by hand` : "";
     return {
       data: { destroyed: server.server, provider: p.type, id: server.provider.id, sites_lost: live.map((s) => s.domain), config_removed: !input.keepConfig, secrets, ...(fleet.config.access === "tailscale" ? { left_tailnet: leftTailnet } : {}) },
-      human: `destroyed ${server.server} at ${p.type}${live.length ? ` (sites gone: ${live.map((s) => s.domain).join(", ")})` : ""}${secrets?.archived ? `\n1Password item ${secrets.item} moved to the archive` : ""}${fleet.config.access === "tailscale" ? (leftTailnet ? (device ? "\nremoved from the tailnet" : "\nlogged out of the tailnet (remove the machine in the Tailscale admin, or give fornax tailscale.api_token)") : "\nwarning: could not log it out of the tailnet — remove the machine in the Tailscale admin") : ""}${warn}`,
+      human: `${gone ? `${server.server} was already gone at ${p.type} — cleaned up after it` : `destroyed ${server.server} at ${p.type}`}${live.length ? ` (sites gone: ${live.map((s) => s.domain).join(", ")})` : ""}${secrets?.archived ? `\n1Password item ${secrets.item} moved to the archive` : ""}${fleet.config.access === "tailscale" ? (leftTailnet ? (device ? "\nremoved from the tailnet" : "\nlogged out of the tailnet (remove the machine in the Tailscale admin, or give fornax tailscale.api_token)") : "\nwarning: could not log it out of the tailnet — remove the machine in the Tailscale admin") : ""}${warn}`,
     };
   },
 });

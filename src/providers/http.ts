@@ -22,7 +22,7 @@ export async function api<T>(base: string, token: string, method: string, path: 
     } catch {
       /* keep raw text */
     }
-    fail(res.status === 401 || res.status === 403 ? "provider_auth" : "provider_error", `${name} ${method} ${path}: HTTP ${res.status} — ${msg}`);
+    fail(res.status === 401 || res.status === 403 ? "provider_auth" : res.status === 404 ? "provider_not_found" : "provider_error", `${name} ${method} ${path}: HTTP ${res.status} — ${msg}`);
   }
   return (text ? JSON.parse(text) : {}) as T;
 }

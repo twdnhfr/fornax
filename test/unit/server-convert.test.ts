@@ -6,7 +6,7 @@ import { phpIni, ufwRules } from "../../src/modules/server.ts";
 
 const fleet = loadFleet({ cwd: join(import.meta.dir, "..", "..", "examples", "fleet") });
 const server = { ...fleet.servers.get("web-1")!, modules: [] as never[] };
-// what red-star (a Forge server) looked like
+// what a server taken over from Forge looked like
 const forge: ServerFacts = {
   timezone: "Europe/Berlin",
   autoReboot: "02:30",

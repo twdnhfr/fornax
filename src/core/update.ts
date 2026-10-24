@@ -8,7 +8,7 @@ import { BUILD, compareVersions, VERSION } from "./version.ts";
 
 export { compareVersions };
 
-/** Where releases come from: a private repo, read with the GitHub CLI's login. */
+/** Where releases come from: read over plain HTTPS, with the GitHub CLI's login as the way into a private fork. */
 export const RELEASE_REPO = process.env.FORNAX_RELEASE_REPO ?? "twdnhfr/fornax";
 
 /** Whether SHA256SUMS carries the release key's signature. */
@@ -33,7 +33,7 @@ function gh(args: string[], timeout = 60_000): string {
   try {
     p = Bun.spawnSync(["gh", ...args], { timeout, stdout: "pipe", stderr: "pipe", env: { ...process.env, GH_PROMPT_DISABLED: "1" } });
   } catch {
-    return fail("no_github_token", `fornax reads its releases from the private repo ${RELEASE_REPO} with the GitHub CLI, which is not installed`, "install gh (brew install gh) and log in: gh auth login");
+    return fail("no_github_token", `${RELEASE_REPO} could not be read over HTTPS, and the GitHub CLI (for a private repo) is not installed`, "check the network; for a private repo install gh (brew install gh) and log in: gh auth login");
   }
   if (p.exitCode !== 0) {
     const err = (p.stderr ?? "").toString().trim().split("\n").pop() ?? "";
@@ -44,9 +44,17 @@ function gh(args: string[], timeout = 60_000): string {
   return (p.stdout ?? "").toString();
 }
 
-/** The newest release (prereleases left out), as a version without the v. */
-export function latestVersion(timeout?: number): string {
-  return gh(["api", `repos/${RELEASE_REPO}/releases/latest`, "--jq", ".tag_name"], timeout).trim().replace(/^v/, "");
+/** A public URL over HTTPS (curl: redirects followed, failures as exit codes); undefined when it fails. */
+function fetchUrl(url: string, timeout: number, out?: string): string | undefined {
+  const p = Bun.spawnSync(["curl", "-fsSL", "--proto", "=https", "--max-time", String(Math.ceil(timeout / 1000)), ...(out ? ["-o", out] : []), url], { stdout: "pipe", stderr: "pipe", timeout: timeout + 2_000 });
+  return p.exitCode === 0 ? (p.stdout ?? "").toString() : undefined;
+}
+
+/** The newest release (prereleases left out), as a version without the v: the public API first, gh for a private repo. */
+export function latestVersion(timeout = 15_000): string {
+  const json = fetchUrl(`https://api.github.com/repos/${RELEASE_REPO}/releases/latest`, timeout);
+  const tag = json ? (JSON.parse(json) as { tag_name?: string }).tag_name : undefined;
+  return (tag ?? gh(["api", `repos/${RELEASE_REPO}/releases/latest`, "--jq", ".tag_name"], timeout)).trim().replace(/^v/, "");
 }
 
 const platform = () => `${process.platform === "darwin" ? "darwin" : "linux"}-${process.arch === "arm64" ? "arm64" : "x64"}`;
@@ -66,7 +74,10 @@ export function installRelease(version: string, dir: string, log: (l: string) =>
   const tmp = mkdtempSync(join(tmpdir(), "fornax-update-"));
   try {
     log(`downloading ${asset} from ${RELEASE_REPO} …`);
-    gh(["release", "download", `v${version}`, "-R", RELEASE_REPO, "-D", tmp, "-p", asset, "-p", "SHA256SUMS", "-p", "SHA256SUMS.sig"], 300_000);
+    // over HTTPS like any download; the GitHub CLI only when that fails (a private repo). Trust comes from the signature, not the channel.
+    const base = `https://github.com/${RELEASE_REPO}/releases/download/v${version}`;
+    const direct = [asset, "SHA256SUMS", "SHA256SUMS.sig"].every((f) => fetchUrl(`${base}/${f}`, 300_000, join(tmp, f)) !== undefined);
+    if (!direct) gh(["release", "download", `v${version}`, "-R", RELEASE_REPO, "-D", tmp, "--clobber", "-p", asset, "-p", "SHA256SUMS", "-p", "SHA256SUMS.sig"], 300_000);
     for (const f of [asset, "SHA256SUMS", "SHA256SUMS.sig"]) if (!existsSync(join(tmp, f))) fail("no_release", `release v${version} has no ${f}`, f === asset ? `no build for ${platform()}` : "releases from before signing cannot be installed with self-update");
     const sums = readFileSync(join(tmp, "SHA256SUMS"));
     if (!verifySums(sums, readFileSync(join(tmp, "SHA256SUMS.sig")))) fail("signature_invalid", `SHA256SUMS of v${version} is not signed with fornax's release key`, "nothing was installed; the download may have been tampered with");

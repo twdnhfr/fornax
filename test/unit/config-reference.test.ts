@@ -21,7 +21,8 @@ describe("config reference", () => {
     expect(ref.markdown).toContain("### `ssh.root_keys`\n\nlist of strings (an OpenSSH public key line) · optional\n\nExactly these public keys");
     expect(ref.markdown).toContain("### `tailscale.allow[].ports`\n\nlist of whole numbers from 1 to 65535, at least 1 entry · required");
     expect(ref.markdown).toContain("relative to the fleet dir. A file needs exactly one of source or content.");
-    expect(ref.undocumented).toContain("firewall.allow[].on");
+    // 1.0: every key of the reference has its description
+    expect(ref.undocumented).toEqual([]);
   });
 
   test("comments are tied to the key below them, by key path", () => {

@@ -1,0 +1,85 @@
+name: Bug report
+description: fornax did something wrong, failed, or broke a server.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A security problem? Do not open an issue — report it privately, see SECURITY.md.
+
+        Remove secrets before you paste anything (tokens, passwords, `.env` values, private keys). Replacing real host names, domains and IP addresses with `example.com`, `web-1` or `203.0.113.10` is fine.
+  - type: input
+    id: version
+    attributes:
+      label: fornax version
+      description: Output of `fornax --version` (from a checkout, also the commit).
+      placeholder: fornax 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installed from
+      options:
+        - release binary
+        - Homebrew
+        - source checkout (bun src/cli.ts)
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: Your machine
+      description: OS, version and architecture of the machine fornax runs on.
+      placeholder: macOS 26.1 arm64
+    validations:
+      required: true
+  - type: input
+    id: server
+    attributes:
+      label: Server
+      description: Ubuntu version and architecture of the server, and the provider if it matters. "none" if no server is involved.
+      placeholder: Ubuntu 24.04 x86_64, Hetzner Cloud
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The command you ran, with its arguments.
+      render: shell
+      placeholder: fornax plan web-1
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: What fornax printed. If you can, run it again with `--json` — errors then carry their code, hint and next step.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Fleet config
+      description: The relevant part of `fornax.yaml` or `servers/<name>.yaml`, secrets removed.
+      render: yaml
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Steps to reproduce, what changed recently, logs from `/var/log/fornax/` on the server.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I removed secrets (tokens, passwords, `.env` values, keys) from everything above.
+          required: true

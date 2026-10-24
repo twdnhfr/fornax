@@ -1,0 +1,31 @@
+name: Feature request
+description: Something fornax should do, or do differently.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The task or situation, not the solution yet. What do you do today instead?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What fornax could do
+      description: Commands, options or config keys you have in mind — an example of the fleet config or the command line helps.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other ways you considered, and how Forge, Ploi or other tools handle it, if you know.
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you build it?
+      options:
+        - "No"
+        - "Yes, with some guidance"
+        - "Yes"

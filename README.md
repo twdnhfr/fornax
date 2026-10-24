@@ -145,6 +145,10 @@ fornax history web-1 --path nginx     # who changed what in /etc, and when
 
 fornax runs the author's production servers — taken over from Laravel Forge in October 2026 — and is tested end to end on throwaway VMs and real Hetzner servers. It is not 1.0 yet: the config format is versioned and upgrades are automatic (`fornax fleet upgrade`), but commands and output may still change. What 1.0 will promise is in [compatibility](docs/compatibility.md); see the [changelog](CHANGELOG.md).
 
+## Contributing
+
+Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to build and test fornax from source, the design rules every change follows, and how to document it. Report security problems privately ([SECURITY.md](SECURITY.md)).
+
 ## License
 
 MIT

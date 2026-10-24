@@ -46,7 +46,7 @@ describe("requires in fornax.yaml", () => {
     const dir = mkdtempSync(join(tmpdir(), "fornax-req-"));
     mkdirSync(join(dir, "servers"));
     writeFileSync(join(dir, "fornax.yaml"), "version: 2\nfleet: t\nrequires: \">=99.0.0\"\n");
-    expect(await main(["server", "list", "--fleet", dir, "--json"])).toBe(1);
+    expect(await main(["server", "list", "--fleet", dir, "--json"])).toBe(2);
     writeFileSync(join(dir, "fornax.yaml"), "version: 2\nfleet: t\nrequires: \">=0.0.1\"\n");
     expect(await main(["server", "list", "--fleet", dir, "--json"])).toBe(0);
   });

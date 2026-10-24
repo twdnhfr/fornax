@@ -158,7 +158,7 @@ defineCommand({
     // a server set up for its first site: databases nobody asked for are said before provision installs them
     const srv = getServer(after, server.server);
     const unused = first && !/^services:/m.test(readFileSync(path, "utf8")) ? (["mysql", "postgres"] as const).filter((x) => srv.services.includes(x) && !sites(after, srv).some((y) => y.db?.engine === x)) : [];
-    const lean = unused.length ? `provision would also install ${unused.join(" and ")}, which no site uses — leave ${unused.length > 1 ? "them" : "it"} out: fornax server set ${server.server} --services ${srv.services.filter((x) => !(unused as string[]).includes(x)).join(",")}` : undefined;
+    const lean = unused.length ? `provision would also install ${unused.join(" and ")}, which no site uses — leave ${unused.length > 1 ? "them" : "it"} out: fornax server set ${server.server} --service ${srv.services.filter((x) => !(unused as string[]).includes(x)).join(",")}` : undefined;
     // a deploy clones on the server: a path in the repo is one there, whatever fornax read here
     const local = input.repo && /^(file:\/\/|\/)/.test(String(input.repo)) ? `${input.repo} is a path on the server: the deploy clones it there (fornax read it here for the preset only). For a repo on this machine: push it to GitHub and use --repo owner/name (fornax git connect then deploys on every push), or push it to a bare repo on the server (git init --bare <path> there, git push root@${server.host}:<path> main)` : undefined;
     const notes = [chosen.note, auto.note, runtime, lean, local].filter(Boolean) as string[];

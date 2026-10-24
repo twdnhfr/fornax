@@ -252,6 +252,6 @@ defineCommand({
         return [head, ...shown.map((c) => `   ${ICON[c.level]} ${c.check.padEnd(13)} ${c.detail}`)].join("\n");
       })]
       .join("\n");
-    return { data: { status, servers: results, credentials, tailnet }, human, exitCode: RANK[status] };
+    return { data: { status, servers: results, credentials, tailnet }, human, exitCode: status === "ok" ? 0 : 1 };
   },
 });

@@ -174,7 +174,7 @@ describe("from nothing to a deployed app and back", () => {
 
   test("policies refuse repos of foreign owners", async () => {
     const r = await fornax("site", "add", "e2e", "x.e2e.test", "--repo", "someone/else");
-    expect(r.code).toBe(1);
+    expect(r.code).toBe(2);
     expect(r.json.code).toBe("policy_violation");
   });
 
@@ -309,7 +309,7 @@ TS
     // reading the site's .env goes through the site user: a link to /etc/shadow yields nothing
     app("ln -sfn /etc/shadow /home/app/app.e2e.test/.env");
     const pull = await fornax("env", "pull", "app.e2e.test");
-    expect(pull.code).toBe(1);
+    expect(pull.code).toBe(2);
     expect(pull.json.code).toBe("no_env");
     // deploy history from before the move: regular files come along, a planted link does not
     app("mkdir -p ~/.fornax/deploys && echo '{}' > ~/.fornax/deploys/20200101000000.json && ln -s /etc/shadow ~/.fornax/deploys/20200101000001.json");

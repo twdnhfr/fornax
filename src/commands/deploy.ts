@@ -378,7 +378,7 @@ defineCommand({
     if (!existsSync(path)) fail("no_local_env", `no local copy at ${path}`, undefined, `fornax env pull ${site.domain}`);
     const d = envDiff(await readEnv(fleet, server, site), readFileSync(path, "utf8"));
     const same = !d.added.length && !d.removed.length && !d.changed.length;
-    return { data: { site: site.domain, ...d, in_sync: same }, human: same ? "no differences" : [...d.added.map((k) => `+ ${k}`), ...d.changed.map((k) => `~ ${k}`), ...d.removed.map((k) => `- ${k}`)].join("\n") };
+    return { data: { site: site.domain, ...d, in_sync: same }, human: same ? "no differences" : [...d.added.map((k) => `+ ${k}`), ...d.changed.map((k) => `~ ${k}`), ...d.removed.map((k) => `- ${k}`)].join("\n"), exitCode: same ? 0 : 1 };
   },
 });
 

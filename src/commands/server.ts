@@ -31,8 +31,8 @@ defineCommand({
     "provider-id": { type: "string", help: "server id at the provider" },
     php: { type: "list", help: "PHP versions", default: ["8.4"] },
     adopt: { type: "boolean", help: "existing server with software on it: manage no server modules until you opt in" },
-    modules: { type: "list", help: `server modules to manage (${MODULES.join(",")})` },
-    services: { type: "list", help: `what the server runs (${SERVICES.join(",")}); default: mysql,postgres,redis,supervisor,fail2ban — e.g. --services postgres,redis,supervisor,fail2ban leaves MySQL out` },
+    module: { type: "list", help: `server modules to manage (${MODULES.join(",")})` },
+    service: { type: "list", help: `what the server runs (${SERVICES.join(",")}); default: mysql,postgres,redis,supervisor,fail2ban — e.g. --service postgres,redis,supervisor,fail2ban leaves MySQL out` },
   },
   examples: ["fornax server add web-1 --host 203.0.113.10", "fornax server add old-forge --host 203.0.113.11 --adopt --php 8.3,8.4"],
   async run(input, ctx) {
@@ -41,9 +41,9 @@ defineCommand({
     const fleet = loadFleet(ctx);
     if (fleet.servers.has(name)) fail("exists", `server "${name}" already exists`, undefined, `fornax explain ${name} --offline`);
     if (!input.host) fail("missing_option", "--host is required", "the IP or hostname fornax connects to with SSH");
-    const modules = input.modules ? (input.modules as string[]) : input.adopt ? [] : [...MODULES];
+    const modules = input.module ? (input.module as string[]) : input.adopt ? [] : [...MODULES];
     for (const m of modules) if (!(MODULES as readonly string[]).includes(m)) fail("invalid_option", `unknown module "${m}"`, `one of: ${MODULES.join(", ")}`);
-    const services = input.services as string[] | undefined;
+    const services = input.service as string[] | undefined;
     assertServices(services ?? []);
     const server: Record<string, unknown> = {
       server: name,
@@ -63,7 +63,7 @@ defineCommand({
       data: { created: path, server, login },
       human:
         `added ${name} → ${path}\n${login}` +
-        (modules.includes("data") ? `\nprovision installs: ${runs.join(", ")}${services ? "" : " (choose with --services, or services: in the file)"}` : "") +
+        (modules.includes("data") ? `\nprovision installs: ${runs.join(", ")}${services ? "" : " (choose with --service, or services: in the file)"}` : "") +
         `\nnext: fornax server status ${name}` +
         (modules.length ? `, then fornax server bootstrap ${name}` : ""),
     };
@@ -80,14 +80,14 @@ defineCommand({
     "ssh-port": { type: "number", help: "SSH port" },
     "public-ipv4": { type: "string", help: "the address visitors reach it at, when --host is another (a tailnet or private IP): DNS records, site check --via public" },
     php: { type: "list", help: "PHP versions, e.g. 8.4,8.5" },
-    services: { type: "list", help: `what the server runs (${SERVICES.join(",")}) — the full list, e.g. --services redis,supervisor,fail2ban` },
+    service: { type: "list", help: `what the server runs (${SERVICES.join(",")}) — the full list, e.g. --service redis,supervisor,fail2ban` },
   },
-  examples: ["fornax server set web-1 --services redis,supervisor,fail2ban", "fornax server set web-1 --php 8.4,8.5", "fornax server set web-1 --ssh-user ubuntu"],
+  examples: ["fornax server set web-1 --service redis,supervisor,fail2ban", "fornax server set web-1 --php 8.4,8.5", "fornax server set web-1 --ssh-user ubuntu"],
   async run(input, ctx) {
     const fleet = loadFleet(ctx);
     const server = getServer(fleet, String(input.name));
-    if (![input.host, input.sshUser, input.sshPort, input.publicIpv4, input.php, input.services].some((v) => v !== undefined)) fail("missing_option", "nothing to change", "pass one or more options, e.g. --services redis,supervisor,fail2ban", "fornax server set --help");
-    assertServices((input.services as string[] | undefined) ?? []);
+    if (![input.host, input.sshUser, input.sshPort, input.publicIpv4, input.php, input.service].some((v) => v !== undefined)) fail("missing_option", "nothing to change", "pass one or more options, e.g. --service redis,supervisor,fail2ban", "fornax server set --help");
+    assertServices((input.service as string[] | undefined) ?? []);
     const changed: string[] = [];
     const path = fleet.files.get(server.server)!;
     const before = readFileSync(path, "utf8");
@@ -101,7 +101,7 @@ defineCommand({
       if (input.sshPort !== undefined) set(["ssh", "port"], Number(input.sshPort), `ssh.port ${input.sshPort}`);
       if (input.publicIpv4 !== undefined) set(["public_ipv4"], String(input.publicIpv4), `public_ipv4 ${input.publicIpv4}`);
       if (input.php !== undefined) set(["php"], input.php, `php ${(input.php as string[]).join(", ")}`);
-      if (input.services !== undefined) set(["services"], input.services, `services ${(input.services as string[]).join(", ")}`);
+      if (input.service !== undefined) set(["services"], input.service, `services ${(input.service as string[]).join(", ")}`);
     });
     // the fleet as a whole decides (a site on a PHP version that goes, policies): a change it refuses is undone
     let after: Fleet;

@@ -17,7 +17,7 @@ From 1.0.0 on, fornax follows [semantic versioning](https://semver.org). Within 
 ## Commands and options
 
 - **Command names, arguments, options and their defaults stay.** New commands and options may be added; nothing is removed or renamed within 1.x.
-- **Syntax:** long options only (`--name value` or `--name=value`); `-h` is `--help`. Lists take commas or repeat the option (`--site a,b` = `--site a --site b`). Switches are `--x`, `--no-x` or `--x=true|false`. An unknown option is an error, never ignored. The global options (`--json`, `--verbose`, `--fleet <dir>`, `--help`) work before or after the command; everything after `--` belongs to the command `fornax run` runs.
+- **Syntax:** long options only (`--name value` or `--name=value`); `-h` is `--help`. Lists take commas or repeat the option (`--site a,b` = `--site a --site b`); a list option is named in the singular (`--module`, `--service`, `--site`), its plural is understood as well. `--ssh-key` is always the private key fornax logs in with (a public key for root is `--authorized-key`). Switches are `--x`, `--no-x` or `--x=true|false`. An unknown option is an error, never ignored. The global options (`--json`, `--verbose`, `--fleet <dir>`, `--help`) work before or after the command; everything after `--` belongs to the command `fornax run` runs.
 - **Commands never prompt.** What is missing is an error with a hint. The exceptions are `fornax shell` (interactive by design), `fornax fleet restore` (the recovery path: `ssh` and `age` may ask on the terminal), and the PIN and touch of a security key or the unlock of the 1Password app.
 - **Commands fornax runs on servers** — `release`, `notify-test`, `hook serve`, `backup-agent run|snapshots|restore` — are hidden from help and not meant to be run by hand. Their arguments and JSON stay compatible within 1.x too, because the fornax on a server may be newer than the one that calls it (see [the binary on a server](#the-binary-on-a-server)).
 - **Environment:** `FORNAX_FLEET` (the fleet outside a fleet repo; else `~/.config/fornax/fleet`), `FORNAX_REMOTE_BINARY` (the Linux build for servers) and `FORNAX_ACTOR` (the name in `/etc`'s history) are covered. Other `FORNAX_*` variables exist for tests and are not.
@@ -38,7 +38,7 @@ With `--json` an error is printed to stdout:
 { "error": "no site \"shop.example.com\" in fleet \"acme\"", "code": "unknown_site", "next": "fornax site list" }
 ```
 
-Without `--json` it goes to stderr as `error [<code>]: <message>`, followed by `hint:` and `next:` lines. Either way the exit code is 1.
+Without `--json` it goes to stderr as `error [<code>]: <message>`, followed by `hint:` and `next:` lines. Either way the exit code is 2 (255 for `run` and `shell`, see below).
 
 - **`code` is the contract.** A code keeps its meaning within 1.x; new codes may appear. Branch on `code`, never on the text.
 - `error`, `hint` and `next` are for people (and agents) to read; their wording may change. `next`, when present, is the command that makes sense next.
@@ -98,16 +98,17 @@ A command may also pass on the code of what failed under it (`server create` rep
 
 | Exit code | Meaning |
 | --- | --- |
-| 0 | done; also `--help`, `help` and `--version` |
-| 1 | an error (see above) — or a result that is not ok, listed below |
-| 2 | `health`: something is critical |
-| other | `run` and `shell` exit with the exit code of the command on the server |
+| 0 | done, and ok; also `--help`, `help` and `--version` |
+| 1 | done, but the result is not ok — listed below; still printed as a result |
+| 2 | an error (see above): the command could not do its job |
+| other | `run` and `shell` exit with the exit code of the command on the server; their own errors exit 255, as ssh's do |
 
-Results with exit code 1, still printed as a result:
+Results with exit code 1:
 
 | Command | exits 1 when |
 | --- | --- |
-| `health` | something needs attention (warning; 2 when critical) |
+| `health` | something needs attention or is critical (`status` says which) |
+| `diff`, `dns status`, `env diff` | they find differences (as `diff` does) |
 | `deploy` | the deploy failed or was rolled back |
 | `server bootstrap`, `server provision`, `server create` | the server is not in sync after three rounds |
 | `tailnet status` | the tailnet differs from what the fleet wants |
@@ -117,7 +118,7 @@ Results with exit code 1, still printed as a result:
 | `site check` | a request got no answer or a 5xx status |
 | `fleet push` | the copy could not be stored on a server |
 
-`plan`, `diff`, `dns status` and `env diff` exit 0 also when they find differences; read `in_sync` in their JSON.
+`plan` exits 0 also when it finds changes: its result is a plan to review (`in_sync` in its JSON).
 
 ## Permission tiers
 

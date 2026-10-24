@@ -49,7 +49,7 @@ describe("help", () => {
     expect(r.code).toBe(0);
     expect(r.out).toStartWith("fornax site add <server> [domain]");
     const bad = await cli("help", "nosuch", "--json");
-    expect(bad.code).toBe(1);
+    expect(bad.code).toBe(2);
     expect(JSON.parse(bad.out).code).toBe("unknown_command");
   });
 
@@ -67,7 +67,7 @@ describe("help", () => {
     expect(r.out).toContain("server destroy");
     expect(r.out).not.toContain("site add");
     const e = await cli("server", "--json");
-    expect(e.code).toBe(1);
+    expect(e.code).toBe(2);
     const err = JSON.parse(e.out);
     expect(err.code).toBe("unknown_command");
     expect(err.hint).toContain("fornax server list");
@@ -89,13 +89,13 @@ describe("output and exit codes", () => {
     expect(JSON.parse((await cli("version", "--json")).out)).toHaveProperty("build");
   });
 
-  test("errors: exit 1, JSON on stdout with --json, text on stderr without", async () => {
+  test("errors: exit 2 (255 for run and shell), JSON on stdout with --json, text on stderr without", async () => {
     const j = await cli("site", "add", "--json");
-    expect(j.code).toBe(1);
+    expect(j.code).toBe(2);
     expect(j.err).toBe("");
     expect(JSON.parse(j.out)).toMatchObject({ code: "missing_argument", next: "fornax site add --help" });
     const t = await cli("site", "add");
-    expect(t.code).toBe(1);
+    expect(t.code).toBe(2);
     expect(t.out).toBe("");
     expect(t.err).toStartWith("error [missing_argument]");
   });
@@ -110,14 +110,14 @@ describe("output and exit codes", () => {
 
   test("--json after -- belongs to the command, not to fornax", async () => {
     const r = await cli("run", "--", "x", "--json");
-    expect(r.code).toBe(1);
+    expect(r.code).toBe(255);
     expect(r.out).toBe("");
     expect(r.err).toStartWith("error [");
   });
 
   test("an invalid server name is an argument error, not a config error", async () => {
     const r = await cli("server", "add", "Web_1", "--host", "203.0.113.10", "--json");
-    expect(r.code).toBe(1);
+    expect(r.code).toBe(2);
     expect(JSON.parse(r.out).code).toBe("invalid_argument");
   });
 });

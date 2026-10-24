@@ -139,6 +139,8 @@ export function parseInput(def: CommandDef, argv: string[]): Input {
     }
     let [key, value] = splitOnce(tok.slice(2), "=");
     let negate = false;
+    // list options are named in the singular (--module web,php); the plural is understood as well
+    if (!(key in specs) && key.endsWith("s") && specs[key.slice(0, -1)]?.type === "list") key = key.slice(0, -1);
     if (!(key in specs) && key.startsWith("no-") && specs[key.slice(3)]?.type === "boolean") {
       key = key.slice(3);
       negate = true;

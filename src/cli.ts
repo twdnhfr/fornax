@@ -81,9 +81,13 @@ function print(result: Result, json: boolean) {
   }
 }
 
+/** Exit code of fornax's own errors: 2 — but 255 for run and shell, which exit with the code of the command on the server (as ssh does). */
+const errorExit = (command?: string) => (command === "run" || command === "shell" ? 255 : 2);
+
 export async function main(rawArgv: string[]): Promise<number> {
   const argv = hoistOptions(rawArgv);
   const wantsJson = jsonRequested(argv);
+  let command: string | undefined;
   try {
     const dashes = argv.indexOf("--");
     const options = dashes < 0 ? argv : argv.slice(0, dashes);
@@ -113,6 +117,7 @@ export async function main(rawArgv: string[]): Promise<number> {
       }
       unknownCommand(words);
     }
+    command = found!.def.name;
     const input = parseInput(found!.def, found!.rest);
     if (input.help) {
       help(found!.def.name.split(" "), wantsJson);
@@ -142,7 +147,7 @@ export async function main(rawArgv: string[]): Promise<number> {
       if (err.hint) process.stderr.write(`hint: ${err.hint}\n`);
       if (err.next) process.stderr.write(`next: ${err.next}\n`);
     }
-    return 1;
+    return errorExit(command);
   }
 }
 

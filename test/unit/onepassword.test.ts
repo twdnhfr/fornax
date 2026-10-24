@@ -94,7 +94,7 @@ describe("fornax secrets setup", () => {
   test("refuses a built-in vault", async () => {
     const dir = mkdtempSync(join(tmpdir(), "fornax-setup-"));
     writeFileSync(join(dir, "fornax.yaml"), "version: 2\nfleet: acme\n");
-    expect(await main(["secrets", "setup", "--fleet", dir, "--vault", "Private", "--json"])).toBe(1);
+    expect(await main(["secrets", "setup", "--fleet", dir, "--vault", "Private", "--json"])).toBe(2);
   });
 });
 

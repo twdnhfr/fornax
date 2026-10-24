@@ -128,7 +128,7 @@ defineCommand({
     location: { type: "string", help: "location / region" },
     php: { type: "list", help: "PHP versions (default: 8.4 on 24.04, 8.5 on 26.04)" },
     ubuntu: { type: "string", help: "Ubuntu LTS: 24.04 or 26.04 (26.04 has only PHP 8.5 until the ondrej PPA supports it)", default: "24.04" },
-    "ssh-key": { type: "string", help: "extra public key file for root (the fleet key ssh.key, or ssh.identity_file + .pub, and ssh.authorized_keys are always given)" },
+    "authorized-key": { type: "string", help: "extra public key file for root (the fleet key ssh.key, or ssh.identity_file + .pub, and ssh.authorized_keys are always given)" },
     "no-provision": { type: "boolean", help: "stop once the server is reachable (then: fornax server bootstrap / provision)" },
     ...applyOptions,
   },
@@ -155,7 +155,7 @@ defineCommand({
     // tagged (tag:server by default): a server is not one of your own devices, so it gets none of their rights
     const authKey = tailnet ? (ts ? await ts.oneOffKey(`fornax ${name}`, fleet.config.tailscale?.tag || undefined) : await secret(fleet, authRef!)) : undefined;
     ctx.log(`ordering ${name} (${input.size} in ${input.location}) at ${p.type} …`);
-    const created = await p.create!({ name, size: String(input.size), location: String(input.location), sshKeys: await publicKeys(fleet, input.sshKey as string | undefined), ubuntu });
+    const created = await p.create!({ name, size: String(input.size), location: String(input.location), sshKeys: await publicKeys(fleet, input.authorizedKey as string | undefined), ubuntu });
     // ordered (and billed) from here on: a failure before it is in the fleet names it, so nothing is left unknown
     let running: ProviderServer;
     try {
@@ -561,7 +561,7 @@ defineCommand({
       }
     }
     const human = rows.map((r) => `${r.ok ? "ok " : "!! "} ${r.name.padEnd(34)} ${r.type.padEnd(5)} ${r.have.join(",") || "(none)"}${r.ok ? "" : `  → should be ${r.want}`}`).join("\n");
-    return { data: { server: server.server, adapter: dns?.type ?? null, records: rows, in_sync: rows.every((r) => r.ok) }, human: dns ? human : `no DNS adapter — set these by hand:\n${rows.map((r) => `${r.name} ${r.type} ${r.want}`).join("\n")}` };
+    return { data: { server: server.server, adapter: dns?.type ?? null, records: rows, in_sync: rows.every((r) => r.ok) }, human: dns ? human : `no DNS adapter — set these by hand:\n${rows.map((r) => `${r.name} ${r.type} ${r.want}`).join("\n")}`, exitCode: rows.every((r) => r.ok) ? 0 : 1 };
   },
 });
 

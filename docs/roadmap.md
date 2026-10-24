@@ -5,8 +5,8 @@ What is planned, what was decided against, and where the groundwork is. Changes 
 ## Before 1.0
 
 - **Hand a taken-over server's own configuration to fornax** (`server convert`): servers imported from Laravel Forge keep Forge's nginx.conf, PHP settings, firewall and database configuration (`modules: []`) until each module is switched over with a plan.
-- **A `node` site preset** for apps with a Node server (Next.js and the like): nginx in front, the app's own process as the site user, a new release started and checked before it takes over.
-- **Exit codes and naming before they are frozen** — see the open points in [compatibility](compatibility.md).
+- **A real update from one release to the next** (`self-update` on a machine, the new build reaching a server with its next deploy), checked before the promise is made.
+- **A description for every key** of the [configuration reference](config.md).
 
 ## After 1.0
 

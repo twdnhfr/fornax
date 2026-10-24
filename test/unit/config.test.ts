@@ -129,7 +129,7 @@ describe("preview names", () => {
     const aliases = loadFleet({ cwd: dir }).servers.get("web-1")!.sites["shop.example.com"]!.aliases;
     expect(aliases).toHaveLength(1);
     expect(aliases[0]).toMatch(/\.preview\.example\.com$/);
-    expect(await main(["site", "alias", "shop.example.com", "--add", aliases[0]!, "--fleet", dir, "--json"])).toBe(1);
+    expect(await main(["site", "alias", "shop.example.com", "--add", aliases[0]!, "--fleet", dir, "--json"])).toBe(2);
     expect(await main(["site", "alias", "shop.example.com", "--remove", aliases[0]!, "--fleet", dir, "--json"])).toBe(0);
     expect(loadFleet({ cwd: dir }).servers.get("web-1")!.sites["shop.example.com"]!.aliases).toEqual([]);
   });
@@ -141,7 +141,7 @@ describe("preview names", () => {
   });
   test("without preview_domain or an IPv4 address, --preview says what to set", async () => {
     const dir = fleet({ "fornax.yaml": "version: 2\nfleet: t\n", "servers/web-1.yaml": server.replace("203.0.113.10", "web-1.example.com") });
-    expect(await main(["site", "add", "web-1", "--preview", "--fleet", dir, "--json"])).toBe(1);
+    expect(await main(["site", "add", "web-1", "--preview", "--fleet", dir, "--json"])).toBe(2);
   });
 
 });
@@ -151,7 +151,7 @@ describe("sites without a domain of their own", () => {
   const added = (dir: string, domain: string) => loadFleet({ cwd: dir }).servers.get("web-1")!.sites[domain]!;
   test("an IP address is no site name: refused, with the sslip.io name for it", async () => {
     const dir = plain();
-    expect(await main(["site", "add", "web-1", "192.168.139.130", "--preset", "static", "--fleet", dir, "--json"])).toBe(1);
+    expect(await main(["site", "add", "web-1", "192.168.139.130", "--preset", "static", "--fleet", dir, "--json"])).toBe(2);
     const yaml = "server: web-1\nhost: 192.168.139.130\nsites:\n  192.168.139.130:\n    preset: static\n";
     expect(loadError(fleet({ "fornax.yaml": "version: 2\nfleet: t\n", "servers/web-1.yaml": yaml })).hint).toContain("192-168-139-130.sslip.io");
   });
@@ -178,7 +178,7 @@ describe("sites without a domain of their own", () => {
   test("a branch the repo does not have is refused when the site is added", async () => {
     const repo = phpRepo();
     const dir = plain();
-    expect(await main(["site", "add", "web-1", "app.example.com", "--repo", `file://${repo}`, "--branch", "master", "--fleet", dir, "--json"])).toBe(1);
+    expect(await main(["site", "add", "web-1", "app.example.com", "--repo", `file://${repo}`, "--branch", "master", "--fleet", dir, "--json"])).toBe(2);
     expect(loadFleet({ cwd: dir }).servers.get("web-1")!.sites["app.example.com"]).toBeUndefined();
   });
   test("the first site says which databases provision would install for nobody", async () => {
@@ -192,7 +192,7 @@ describe("sites without a domain of their own", () => {
       process.stdout.write = write;
     }
     const notes = JSON.parse(out.join("")).notes as string[];
-    expect(notes.find((n) => n.includes("provision would also install"))).toContain("mysql, which no site uses — leave it out: fornax server set web-1 --services postgres,redis,supervisor,fail2ban");
+    expect(notes.find((n) => n.includes("provision would also install"))).toContain("mysql, which no site uses — leave it out: fornax server set web-1 --service postgres,redis,supervisor,fail2ban");
   });
   test("site add reads the preset off the repo", async () => {
     const repo = phpRepo();
@@ -214,7 +214,7 @@ describe("site set", () => {
   });
   test("preset node needs a start command; leaving node drops it", async () => {
     const d = dir();
-    expect(await main(["site", "set", "shop.example.com", "--preset", "node", "--fleet", d, "--json"])).toBe(1);
+    expect(await main(["site", "set", "shop.example.com", "--preset", "node", "--fleet", d, "--json"])).toBe(2);
     expect(await main(["site", "set", "shop.example.com", "--preset", "node", "--start", "bun run start", "--fleet", d, "--json"])).toBe(0);
     expect(spec(d).node?.start).toBe("bun run start");
     expect(await main(["site", "set", "shop.example.com", "--preset", "php", "--fleet", d, "--json"])).toBe(0);
@@ -223,9 +223,9 @@ describe("site set", () => {
   test("a change the fleet refuses as a whole is undone", async () => {
     const d = dir();
     const before = readFileSync(join(d, "servers/web-1.yaml"), "utf8");
-    expect(await main(["site", "set", "shop.example.com", "--php", "7.0", "--fleet", d, "--json"])).toBe(1);
+    expect(await main(["site", "set", "shop.example.com", "--php", "7.0", "--fleet", d, "--json"])).toBe(2);
     expect(readFileSync(join(d, "servers/web-1.yaml"), "utf8")).toBe(before);
-    expect(await main(["site", "set", "shop.example.com", "--fleet", d, "--json"])).toBe(1);
+    expect(await main(["site", "set", "shop.example.com", "--fleet", d, "--json"])).toBe(2);
   });
 });
 
@@ -238,14 +238,15 @@ describe("server set and the login", () => {
   });
   test("server set changes services and PHP; a change the fleet refuses is undone", async () => {
     const d = dir();
+    // list options are singular; the plural (--services) is understood as well
     expect(await main(["server", "set", "web-1", "--services", "redis,supervisor", "--php", "8.4,8.5", "--fleet", d, "--json"])).toBe(0);
     expect(loadFleet({ cwd: d }).servers.get("web-1")!).toMatchObject({ services: ["redis", "supervisor"], php: ["8.4", "8.5"] });
     // a site pinned to PHP 8.4 keeps the server from dropping it
     expect(await main(["site", "set", "shop.example.com", "--php", "8.4", "--fleet", d, "--json"])).toBe(0);
     const before = readFileSync(join(d, "servers/web-1.yaml"), "utf8");
-    expect(await main(["server", "set", "web-1", "--php", "8.5", "--fleet", d, "--json"])).toBe(1);
+    expect(await main(["server", "set", "web-1", "--php", "8.5", "--fleet", d, "--json"])).toBe(2);
     expect(readFileSync(join(d, "servers/web-1.yaml"), "utf8")).toBe(before);
-    expect(await main(["server", "set", "web-1", "--services", "nginx", "--fleet", d, "--json"])).toBe(1);
+    expect(await main(["server", "set", "web-1", "--service", "nginx", "--fleet", d, "--json"])).toBe(2);
   });
 });
 
@@ -260,7 +261,7 @@ describe("redis and the next step", () => {
     const s = f.servers.get("web-1")!;
     expect(["a.example.com", "b.example.com", "c.example.com"].map((x) => resolveSite(f, s, x).redis)).toEqual(["own", "none", "own"]);
     expect(await main(["site", "set", "c.example.com", "--redis", "none", "--fleet", d, "--json"])).toBe(0);
-    expect(await main(["site", "set", "c.example.com", "--redis", "lots", "--fleet", d, "--json"])).toBe(1);
+    expect(await main(["site", "set", "c.example.com", "--redis", "lots", "--fleet", d, "--json"])).toBe(2);
   });
   test("a server this fleet repo never planned as a whole is provisioned next, not planned", async () => {
     const d = dir();
@@ -268,7 +269,7 @@ describe("redis and the next step", () => {
     const write = process.stdout.write.bind(process.stdout);
     process.stdout.write = ((c: string) => (out.push(String(c)), true)) as typeof process.stdout.write;
     try {
-      expect(await main(["server", "set", "web-1", "--services", "redis,supervisor", "--fleet", d, "--json"])).toBe(0);
+      expect(await main(["server", "set", "web-1", "--service", "redis,supervisor", "--fleet", d, "--json"])).toBe(0);
     } finally {
       process.stdout.write = write;
     }

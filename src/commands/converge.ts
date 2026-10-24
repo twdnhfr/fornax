@@ -83,7 +83,8 @@ defineCommand({
     const diffs = input.noContent ? {} : await contentDiffs(fleet, server, resources, plan.changes);
     const data = { ...planData(plan), diffs };
     const human = [renderChanges(plan), ...Object.values(diffs).filter(Boolean)].join("\n\n");
-    return { data, human };
+    // like diff(1): differences are a result that is not ok — plan exits 0, its result is a plan to review
+    return { data, human, exitCode: plan.changes.length ? 1 : 0 };
   },
 });
 

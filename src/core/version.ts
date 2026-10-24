@@ -29,10 +29,14 @@ export function compareVersions(a: string, b: string): number {
  * The same formula runs in shell for the server's binary (binaryProbe), so both sides compare alike.
  */
 export function orderKey(version: string, build?: string): string {
-  const [core, pre] = version.replace(/^v/, "").split("-", 2) as [string, string | undefined];
+  const v = version.replace(/^v/, "");
+  const dash = v.indexOf("-");
+  const [core, pre] = dash < 0 ? [v, undefined] : [v.slice(0, dash), v.slice(dash + 1)];
   const n = core.split(".").map((x) => String(Number(x) || 0).padStart(6, "0"));
-  return `${n[0]}.${n[1] ?? "000000"}.${n[2] ?? "000000"}.${pre ? `0${pre}` : "1"}~${build ?? ""}`;
+  // rc.10 after rc.9: numeric parts of a prerelease padded as well
+  const p = pre?.split(".").map((x) => (/^\d+$/.test(x) ? x.padStart(6, "0") : x)).join(".");
+  return `${n[0]}.${n[1] ?? "000000"}.${n[2] ?? "000000"}.${p ? `0${p}` : "1"}~${build ?? ""}`;
 }
 
 /** orderKey in awk, reading "<version> <build>" (build may be empty). */
-export const ORDER_KEY_AWK = `awk '{split($1,a,"-"); split(a[1],n,"."); pre=(a[2]==""?"1":"0" a[2]); printf "%06d.%06d.%06d.%s~%s", n[1],n[2],n[3],pre,$2}'`;
+export const ORDER_KEY_AWK = `awk '{i=index($1,"-"); core=(i?substr($1,1,i-1):$1); pre=(i?substr($1,i+1):""); split(core,n,"."); p=""; if (pre!="") { k=split(pre,q,"."); for (j=1;j<=k;j++) p=p (j>1?".":"") (q[j] ~ /^[0-9]+$/ ? sprintf("%06d",q[j]) : q[j]); p="0" p } else p="1"; printf "%06d.%06d.%06d.%s~%s", n[1],n[2],n[3],p,$2}'`;

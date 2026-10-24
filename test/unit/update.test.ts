@@ -16,13 +16,15 @@ describe("versions", () => {
     expect(compareVersions("1.0.0-rc.10", "1.0.0-rc.9")).toBeGreaterThan(0);
   });
   test("the order key sorts the same in fornax and in the server's shell", () => {
-    const cases: [string, string | undefined][] = [["0.2.0", "2026-11-01T10:00:00Z"], ["1.0.0-rc.1", undefined], ["10.0.3", "2026-01-01T00:00:00Z"], ["0.1.0", undefined]];
+    const cases: [string, string | undefined][] = [["0.2.0", "2026-11-01T10:00:00Z"], ["1.0.0-rc.1", undefined], ["10.0.3", "2026-01-01T00:00:00Z"], ["0.1.0", undefined], ["1.0.0-rc.10", "x"], ["1.0.0-rc.9", "x"], ["2.0.0-beta.2.1", undefined]];
     for (const [v, b] of cases) {
       const sh = Bun.spawnSync(["sh", "-c", `printf '%s %s\\n' ${v} '${b ?? ""}' | ${ORDER_KEY_AWK}`]).stdout.toString();
       expect(sh).toBe(orderKey(v, b));
     }
     expect(orderKey("0.3.0", "2026-01-01T00:00:00Z") > orderKey("0.2.0", "2026-12-01T00:00:00Z")).toBe(true);
     expect(orderKey("1.0.0", "2026-01-01T00:00:00Z") > orderKey("1.0.0", undefined)).toBe(true);
+    expect(orderKey("1.0.0-rc.10") > orderKey("1.0.0-rc.9")).toBe(true);
+    expect(orderKey("1.0.0") > orderKey("1.0.0-rc.10")).toBe(true);
   });
 });
 

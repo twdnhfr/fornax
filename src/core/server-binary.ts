@@ -32,7 +32,9 @@ if [ -x ${BIN} ]; then sha256sum ${BIN} | cut -c1-64; ${BIN} --version --json 2>
   try {
     remote = JSON.parse(version ?? "{}");
   } catch {}
-  const remoteBuild = remote.build ?? undefined;
+  // only plain values from the server: they are compared and printed here
+  if (remote.version && !/^[\w.+-]+$/.test(remote.version)) remote.version = undefined;
+  const remoteBuild = remote.build && /^[\w.:+-]+$/.test(remote.build) ? remote.build : undefined;
   // the version first, then the build stamp (orderKey) — the same rule as the apply's probe
   if (remote.version && orderKey(remote.version, remoteBuild) > orderKey(VERSION, local.build)) {
     log(`fornax on ${server.server} is newer (${remote.version}${remoteBuild ? `, build ${remoteBuild}` : ""}) than this one (${VERSION}${local.build ? `, build ${local.build}` : ""}) — left as it is`);

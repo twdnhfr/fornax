@@ -276,3 +276,17 @@ describe("redis and the next step", () => {
     expect(JSON.parse(out.join("")).next).toBe("fornax server provision web-1");
   });
 });
+
+describe("refused edits leave nothing behind", () => {
+  test("site add with a PHP version the server lacks keeps the server file as it was", async () => {
+    const d = fleet({ "fornax.yaml": "version: 2\nfleet: t\n", "servers/web-1.yaml": server });
+    const before = readFileSync(join(d, "servers/web-1.yaml"), "utf8");
+    expect(await main(["site", "add", "web-1", "new.example.com", "--preset", "php", "--php", "7.4", "--fleet", d, "--json"])).toBe(2);
+    expect(readFileSync(join(d, "servers/web-1.yaml"), "utf8")).toBe(before);
+  });
+  test("values that reach shells are checked: public_ipv4, php_default", () => {
+    expect(loadError(fleet({ "fornax.yaml": "version: 2\nfleet: t\n", "servers/web-1.yaml": server.replace("sites:", "public_ipv4: '1.2.3.4;id'\nsites:") })).code).toBe("config_invalid");
+    expect(loadError(fleet({ "fornax.yaml": "version: 2\nfleet: t\n", "servers/web-1.yaml": server.replace("sites:", "php_default: '8.4;id'\nsites:") })).code).toBe("config_invalid");
+    expect(loadError(fleet({ "fornax.yaml": "version: 2\nfleet: t\n", "servers/web-1.yaml": server.replace("sites:", "php_default: '8.5'\nsites:") })).message).toContain("php_default 8.5");
+  });
+});

@@ -40,10 +40,12 @@ export function presetFromFiles(files: string[], pkg?: Pkg): Detected {
 /** How this machine reads a repo: GitHub over HTTPS (never SSH, where a key agent may ask for a touch); other SSH repos not at all. */
 function readableUrl(repo: string): string | undefined {
   const r = repoUrl(repo);
-  return r.github ? `https://github.com/${r.github}.git` : r.ssh ? undefined : r.url;
+  if (r.github) return `https://github.com/${r.github}.git`;
+  // https and local repos only: no ssh (an agent may ask for a touch), no ext:: or other transports
+  return /^(https:\/\/|file:\/\/\/|\/)[^\s]*$/.test(r.url) && !r.url.startsWith("-") ? r.url : undefined;
 }
 
-const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "true", SSH_ASKPASS: "true" });
+const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "true", SSH_ASKPASS: "true", GIT_ALLOW_PROTOCOL: "https:file", GIT_SSH_COMMAND: "ssh -o BatchMode=yes" });
 
 /** The repo's branches as seen from here; undefined when it cannot be read from here (private, SSH, offline). */
 export function remoteBranches(repo: string): string[] | undefined {

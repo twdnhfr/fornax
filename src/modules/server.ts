@@ -64,12 +64,14 @@ ${s.auto_reboot === false ? "" : `Unattended-Upgrade::Automatic-Reboot-Time "${s
 export function ufwRules(ctx: ModuleCtx): string[] {
   const s = ctx.server;
   const rules = ["allow 80/tcp", "allow 443/tcp"];
+  // the server's own SSH port (ssh.port of the server file) before the fleet's — the one fornax connects to
+  const sshPort = s.ssh?.port ?? ctx.fleet.config.ssh.port;
   // From the tailnet only SSH (sshd as a fallback; Tailscale SSH answers before the firewall anyway).
   // Note: in tailscaled's default netfilter mode its own ts-input chain accepts everything from
   // tailscale0 before ufw sees it — who may reach what over the tailnet is the tailnet policy's
   // decision (acls), this rule only holds with --netfilter-mode=nodivert.
-  if (ctx.fleet.config.access === "tailscale") rules.push("allow in on tailscale0 to any port 22 proto tcp");
-  else for (const from of s.firewall.ssh_from) rules.push(from === "any" ? `allow ${ctx.fleet.config.ssh.port}/tcp` : `allow from ${from} to any port ${ctx.fleet.config.ssh.port} proto tcp`);
+  if (ctx.fleet.config.access === "tailscale") rules.push(`allow in on tailscale0 to any port ${sshPort} proto tcp`);
+  else for (const from of s.firewall.ssh_from) rules.push(from === "any" ? `allow ${sshPort}/tcp` : `allow from ${from} to any port ${sshPort} proto tcp`);
   for (const a of s.firewall.allow) {
     // written as `ufw show added` lists them, so the probe compares like with like
     if (a.on) rules.push(`allow in on ${a.on}${a.from ? ` from ${a.from}` : ""}${a.port !== undefined ? ` to any port ${a.port} proto ${a.proto}` : ""}`);

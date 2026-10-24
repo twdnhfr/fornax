@@ -69,7 +69,8 @@ defineCommand({
     if (!["host", "public"].includes(String(input.via))) fail("invalid_option", "--via must be host or public");
     if (input.via === "public" && !server.public_ipv4) fail("no_public_ip", `${server.server} has no public_ipv4 in its config`, `--via public asks the server's public address, as visitors reach it; give it one: fornax server set ${server.server} --public-ipv4 <ip> (--via host, the default, uses ${server.host})`);
     const addr = input.via === "public" ? server.public_ipv4! : server.host;
-    const paths = (input.path as string[] | undefined) ?? ["/", ...(site.spec.health_check ? [site.spec.health_check] : [])];
+    // a path, never "@other.host/…": the slash keeps every request on the site's own name
+    const paths = ((input.path as string[] | undefined) ?? ["/", ...(site.spec.health_check ? [site.spec.health_check] : [])]).map((p) => (p.startsWith("/") ? p : `/${p}`));
     const results: { url: string; status: number | null; redirect: string | null; seconds: number; error?: string; body?: string }[] = [];
     const MARK = "\n@@fornax-check@@ ";
     // tls none: the site has no HTTPS to ask for
@@ -94,16 +95,20 @@ defineCommand({
         }
       }
     }
-    const cert = site.tlsIssuer === "none" ? "" : Bun.spawnSync(["bash", "-c", `openssl s_client -connect ${addr}:443 -servername ${site.domain} 2>/dev/null | openssl x509 -noout -issuer -enddate -ext subjectAltName 2>/dev/null`], { stdin: "ignore", timeout: 15_000 }).stdout.toString();
+    // two processes with argv, no shell: fleet values never reach one
+    const hello = site.tlsIssuer === "none" ? null : Bun.spawnSync(["openssl", "s_client", "-connect", `${addr.includes(":") ? `[${addr}]` : addr}:443`, "-servername", site.domain], { stdin: "ignore", stderr: "ignore", timeout: 15_000 });
+    const cert = hello ? Bun.spawnSync(["openssl", "x509", "-noout", "-issuer", "-enddate", "-ext", "subjectAltName"], { stdin: hello.stdout, stderr: "ignore", timeout: 5_000 }).stdout.toString() : "";
     const issuer = cert.match(/issuer=.*?(?:O\s*=\s*([^,\n]+))?.*?CN\s*=\s*([^\n]+)/)?.slice(1).filter(Boolean).join(" / ") ?? null;
     const expires = cert.match(/notAfter=(.*)/)?.[1] ?? null;
     const names = cert.match(/Subject Alternative Name:[^\n]*\n\s*([^\n]+)/)?.[1]?.split(",").map((n) => n.trim().replace(/^DNS:/, "")) ?? [];
     // --verbose: how long each answer took, every name the certificate covers, and which it misses
     const missing = names.length ? site.names.filter((n) => !names.includes(n) && !names.includes(n.replace(/^[^.]+/, "*"))) : [];
+    // what the server sends back is shown, never interpreted by the terminal
+    const clean = (t: string) => t.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "?");
     const human = [
-      ...results.map((r) => `${String(r.status ?? "ERR").padEnd(4)} ${r.url}${ctx.verbose && r.status ? ` (${r.seconds.toFixed(2)}s)` : ""}${r.redirect ? ` → ${r.redirect}` : ""}${r.error ? ` — ${r.error}` : ""}${r.body !== undefined ? `\n     ${r.body.replace(/\s+/g, " ").trim() || "(empty)"}` : ""}`),
-      site.tlsIssuer === "none" ? "certificate: none (tls: none, HTTP only)" : `certificate: ${issuer ?? "none"}${expires ? `, until ${expires}` : ""}`,
-      ...(ctx.verbose && names.length ? [`  covers: ${names.join(", ")}`] : []),
+      ...results.map((r) => `${String(r.status ?? "ERR").padEnd(4)} ${r.url}${ctx.verbose && r.status ? ` (${r.seconds.toFixed(2)}s)` : ""}${r.redirect ? ` → ${clean(r.redirect)}` : ""}${r.error ? ` — ${clean(r.error)}` : ""}${r.body !== undefined ? `\n     ${clean(r.body.replace(/\s+/g, " ").trim()) || "(empty)"}` : ""}`),
+      site.tlsIssuer === "none" ? "certificate: none (tls: none, HTTP only)" : `certificate: ${clean(issuer ?? "none")}${expires ? `, until ${clean(expires)}` : ""}`,
+      ...(ctx.verbose && names.length ? [`  covers: ${clean(names.join(", "))}`] : []),
       ...(missing.length ? [`  ! does not cover: ${missing.join(", ")}`] : []),
     ].join("\n");
     return { data: { site: site.domain, via: addr, results, certificate: { issuer, expires, names, missing } }, human, exitCode: results.some((r) => !r.status || r.status >= 500) ? 1 : 0 };

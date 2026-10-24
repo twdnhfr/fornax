@@ -71,13 +71,13 @@ How fornax logs in to the servers. A server's own `ssh:` overrides user, port an
 
 ### `ssh.user`
 
-string · default `"root"`
+string (a Linux user name) · default `"root"`
 
 The user fornax logs in as. Any user other than root needs sudo: passwordless, or with sudo_password.
 
 ### `ssh.port`
 
-whole number · default `22`
+whole number from 1 to 65535 · default `22`
 
 SSH port fornax connects to; with access "ssh", ufw keeps it open.
 
@@ -531,13 +531,13 @@ one of `"arm64"`, `"x86_64"` · optional
 
 ### `public_ipv4`
 
-string · optional
+string (an IPv4 address) · optional
 
 Public addresses (for DNS); `host` may be a private or tailnet name.
 
 ### `public_ipv6`
 
-string · optional
+string (an IPv6 address) · optional
 
 Public IPv6 address, for DNS records and reverse DNS.
 
@@ -555,7 +555,7 @@ PHP versions installed side by side, each with its own FPM service, e.g. ["8.3",
 
 ### `php_default`
 
-string · optional
+string (a PHP version such as 8.4) · optional
 
 PHP version the `php` command points to and sites without their own `php` use; default: the last in `php`.
 
@@ -685,13 +685,13 @@ Overrides the fleet's ssh settings for this server (e.g. a non-root user with su
 
 ### `ssh.user`
 
-string · optional
+string (a Linux user name) · optional
 
 User fornax logs in as on this server; any user but root runs commands through sudo.
 
 ### `ssh.port`
 
-whole number · optional
+whole number from 1 to 65535 · optional
 
 SSH port of this server.
 
@@ -875,7 +875,7 @@ With tls.issuer "existing": path of this name's private key on the server.
 
 ### `sites.<domain>.php`
 
-string · optional
+string (a PHP version such as 8.4) · optional
 
 PHP version of the site, one of the server's `php`; default: the server's php_default.
 

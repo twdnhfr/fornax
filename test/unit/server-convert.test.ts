@@ -52,3 +52,10 @@ describe("server convert", () => {
     expect(phpIni("8.4")).toContain("max_execution_time = 60");
   });
 });
+
+describe("review fixes", () => {
+  test("ufw opens the server's own SSH port", () => {
+    const s = { ...server, ssh: { port: 2222 }, firewall: { ...server.firewall, ssh_from: ["any"] } };
+    expect(ufwRules({ fleet, server: s } as never)).toContain("allow 2222/tcp");
+  });
+});

@@ -108,7 +108,7 @@ export const SiteSchema = z.strictObject({
     )
     .default([]),
   /** PHP version of the site, one of the server's `php`; default: the server's php_default. */
-  php: z.string().optional(),
+  php: z.string().regex(/^\d\.\d$/, "a PHP version such as 8.4").optional(),
   /**
    * What kind of app: "laravel" (artisan steps on deploy, .env and storage set up), "php" (PHP-FPM
    * without Laravel steps), "static" (files only, no PHP) or "node" (its own server, see node).
@@ -393,9 +393,9 @@ export const ServerSchema = z.strictObject({
    */
   arch: z.enum(["arm64", "x86_64"]).optional(),
   /** Public addresses (for DNS); `host` may be a private or tailnet name. */
-  public_ipv4: z.string().optional(),
+  public_ipv4: z.string().refine(isIPv4, "an IPv4 address").optional(),
   /** Public IPv6 address, for DNS records and reverse DNS. */
-  public_ipv6: z.string().optional(),
+  public_ipv6: z.string().regex(/^[\da-fA-F:]+$/, "an IPv6 address").optional(),
   /** Server-level modules fornax manages. Adopted servers start with []. */
   modules: z.array(z.enum(MODULES)).default([...MODULES]),
   /**
@@ -407,7 +407,7 @@ export const ServerSchema = z.strictObject({
    * PHP version the `php` command points to and sites without their own `php` use; default: the
    * last in `php`.
    */
-  php_default: z.string().optional(),
+  php_default: z.string().regex(/^\d\.\d$/, "a PHP version such as 8.4").optional(),
   /**
    * Extra PHP extensions for every version in `php`, by package suffix (imagick installs
    * php8.4-imagick), on top of fornax's standard set.
@@ -483,9 +483,9 @@ export const ServerSchema = z.strictObject({
   ssh: z
     .strictObject({
       /** User fornax logs in as on this server; any user but root runs commands through sudo. */
-      user: z.string().optional(),
+      user: z.string().regex(/^[a-z_][a-z0-9_-]{0,31}$/, "a Linux user name").optional(),
       /** SSH port of this server. */
-      port: z.number().int().optional(),
+      port: z.number().int().min(1).max(65535).optional(),
       /** For a non-root user: secret reference of its sudo password (omit for passwordless sudo). */
       sudo_password: z.string().optional(),
       /** Root keys for this server only, added to the fleet's ssh.root_keys (e.g. a panel that still manages it). */
@@ -554,9 +554,9 @@ export const FleetSchema = z.strictObject({
   ssh: z
     .strictObject({
       /** The user fornax logs in as. Any user other than root needs sudo: passwordless, or with sudo_password. */
-      user: z.string().default("root"),
+      user: z.string().regex(/^[a-z_][a-z0-9_-]{0,31}$/, "a Linux user name").default("root"),
       /** SSH port fornax connects to; with access "ssh", ufw keeps it open. */
-      port: z.number().int().default(22),
+      port: z.number().int().min(1).max(65535).default(22),
       /**
        * Private key file fornax logs in with (only this key, not your agent's). ~/ is your home
        * directory; other relative paths are relative to the fleet repo. Its .pub goes to servers that

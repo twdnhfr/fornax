@@ -209,6 +209,7 @@ function validateServer(fleet: Fleet, server: Server): void {
   const users = new Map<string, string>();
   const dbs = new Map<string, string>();
   const admin = server.admin_user ?? fleet.config.admin_user;
+  if (server.php_default && !server.php.includes(server.php_default)) fail("config_invalid", `${server.server}: php_default ${server.php_default} is not one of its PHP versions (php: ${server.php.join(", ")})`);
   for (const domain of Object.keys(server.sites)) {
     if (isIPv4(domain)) fail("config_invalid", `${server.server}/${domain}: an IP address, not a name — a site needs one for its vhost and certificate`, `${sslipDomain(domain)} is one: sslip.io resolves it to ${domain}`);
     const site = resolveSite(fleet, server, domain);

@@ -144,13 +144,20 @@ defineCommand({
     if (input.schedule) site.schedule = true;
     if ((input.daemon as string[] | undefined)?.length) site.daemons = (input.daemon as string[]).map((cmd) => ({ cmd }));
     let runtime: string | undefined;
+    const before = readFileSync(fleet.files.get(server.server)!, "utf8");
     const path = editServerFile(fleet, server.server, (doc) => {
       doc.setIn(["sites", domain], doc.createNode(site));
       if (chosen.start) runtime = ensureRuntime(doc, server, chosen.start);
     });
-    // validate the result as a whole (user collisions, php versions, policies)
-    const after = loadFleet(ctx);
-    assertPolicies(after, getServer(after, server.server));
+    // validate the result as a whole (user collisions, php versions, policies); a refused site is not left behind
+    let after: Fleet;
+    try {
+      after = loadFleet(ctx);
+      assertPolicies(after, getServer(after, server.server));
+    } catch (e) {
+      writeFileSync(path, before);
+      throw e;
+    }
     const { site: resolved } = findSite(after, domain);
     // the first site on a server comes with the server's own setup (nginx, PHP …); later ones are a plan
     const first = sites(after, getServer(after, server.server)).filter((x) => x.spec.state === "present").length === 1 || !everPlannedWhole(after, server.server);

@@ -12,7 +12,8 @@
     "test": "bun test test/unit",
     "test:int": "bun test test/integration --timeout 1800000",
     "typecheck": "tsc --noEmit",
-    "build": "bash scripts/build.sh"
+    "build": "bash scripts/build.sh",
+    "docs": "bun scripts/config-reference.ts"
   },
   "dependencies": {
     "yaml": "^2.9.1",

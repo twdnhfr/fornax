@@ -122,6 +122,7 @@ fornax history web-1 --path nginx     # who changed what in /etc, and when
 
 | | |
 | --- | --- |
+| [Configuration](docs/config.md) | every key of `fornax.yaml`, the server files and sites: type, default, meaning |
 | [Deploys](docs/deploys.md) | releases, build, health checks, rollback, push-to-deploy |
 | [Servers](docs/servers.md) | ordering, renaming and destroying servers; Tailscale |
 | [Backups](docs/backups.md) | restic to a Hetzner Storage Box, restore |

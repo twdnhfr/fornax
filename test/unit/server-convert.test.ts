@@ -62,6 +62,17 @@ describe("apt sources", () => {
     expect(set(["security"]).retire).toEqual(["/etc/apt/sources.list.d/crowdsec_crowdsec.list"]);
     expect(set(["web"]).retire).toEqual(["/etc/nginx/conf.d/gzip.conf", "/etc/nginx/conf.d/uploads.conf"]);
   });
+  test("the same repo under another channel or mirror counts too (packagecloud /ubuntu/ noble, add-apt-repository's .sources)", () => {
+    const other = { ...forge, aptSources: [
+      { path: "/etc/apt/sources.list.d/crowdsec_crowdsec.list", url: "https://packagecloud.io/crowdsec/crowdsec/ubuntu/" },
+      { path: "/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources", url: "https://ppa.launchpadcontent.net/ondrej/php/ubuntu/" },
+      { path: "/etc/apt/sources.list.d/mysql.list", url: "http://repo.mysql.com/apt/ubuntu/" },
+    ] };
+    const r = (areas: Parameters<typeof planConversion>[3]) => Object.fromEntries(planConversion(fleet, server, other, areas).set.map(([p, v]) => [p.join("."), v])).retire;
+    expect(r(["security"])).toEqual(["/etc/apt/sources.list.d/crowdsec_crowdsec.list"]);
+    expect(r(["php"])).toEqual(["/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources"]);
+    expect(r(["data"])).toBeUndefined();
+  });
 });
 
 describe("review fixes", () => {

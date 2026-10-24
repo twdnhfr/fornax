@@ -175,7 +175,15 @@ export function security(ctx: ModuleCtx): Resource[] {
   const lapi = "/etc/crowdsec/config.yaml /etc/crowdsec/local_api_credentials.yaml /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml";
   const r: Resource[] = [
     ...aptRepo(ctx, REPOS.crowdsec!, "security"),
-    packages("crowdsec", ["crowdsec", "crowdsec-firewall-bouncer-iptables"], o),
+    packages("crowdsec", ["crowdsec"], o),
+    // either firewall bouncer will do: a server set up with the nftables one keeps it
+    check(
+      "crowdsec-bouncer",
+      "CrowdSec firewall bouncer",
+      "dpkg -s crowdsec-firewall-bouncer-iptables >/dev/null 2>&1 || dpkg -s crowdsec-firewall-bouncer-nftables >/dev/null 2>&1",
+      "DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=900 install -y -qq crowdsec-firewall-bouncer-iptables >/dev/null",
+      o,
+    ),
     // CrowdSec's API defaults to 8080 — the port Reverb and many dev servers expect; move it like Forge does
     check(
       "crowdsec-port",

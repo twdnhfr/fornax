@@ -14,7 +14,15 @@ import { PHP_INI_DEFAULTS } from "../modules/server.ts";
 
 /** The apt repos each module writes a source file for (`/etc/apt/sources.list.d/<name>.list`). */
 const MODULE_REPOS: Record<string, string[]> = { access: ["tailscale"], security: ["crowdsec"], web: ["nginx"], php: ["php", "node"], data: ["redis"] };
-const repoUrl = (key: string) => REPOS[key]!.line("K", "noble").match(/https?:\/\/\S+/)?.[0]?.replace(/\/+$/, "") ?? "";
+/** The same repo under any channel or mirror (packagecloud's /ubuntu/ noble next to /any/ any, ondrej/php from a mirror). */
+const REPO_MATCH: Record<string, RegExp> = {
+  tailscale: /\/\/pkgs\.tailscale\.com\//,
+  crowdsec: /\/\/packagecloud\.io\/crowdsec\/crowdsec\//,
+  nginx: /\/\/nginx\.org\/packages\//,
+  php: /\/ondrej\/php(\/|$)/,
+  node: /\/\/deb\.nodesource\.com\//,
+  redis: /\/\/packages\.redis\.io\//,
+};
 
 export const SERVER_AREAS = MODULES;
 export type ServerArea = (typeof MODULES)[number];
@@ -38,7 +46,7 @@ if [ -n "$v" ] && [ -f /etc/php/$v/fpm/php.ini ]; then
 fi
 grep -qsE '^\\s*requirepass ' /etc/redis/redis.conf /etc/redis/*.conf && fact redis_password yes || fact redis_password no
 apt-cache policy redis-server 2>/dev/null | grep -q packages.redis.io && fact redis_source official
-for f in /etc/apt/sources.list.d/*.list; do
+for f in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] && fact aptsrc "$f $(grep -vE '^\\s*#' "$f" | grep -oE 'https?://[^ ]+' | head -1)"
 done
 for f in /etc/nginx/conf.d/*.conf; do
@@ -156,7 +164,7 @@ export function planConversion(fleet: Fleet, server: Server, facts: ServerFacts,
     for (const key of MODULE_REPOS[area] ?? []) {
       const own = `/etc/apt/sources.list.d/${REPOS[key]!.name}.list`;
       for (const src of facts.aptSources) {
-        if (src.path !== own && src.url.replace(/\/+$/, "") === repoUrl(key) && !retire.includes(src.path)) {
+        if (src.path !== own && REPO_MATCH[key]!.test(src.url) && !retire.includes(src.path)) {
           retire.push(src.path);
           changes.push(`retire: ${src.path} (the same apt repo as fornax's ${own})`);
         }

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONFIG_VERSION } from "../../src/core/config-version.ts";
 import { FornaxError } from "../../src/core/errors.ts";
-import { loadFleet } from "../../src/core/fleet.ts";
+import { loadFleet, resolveSite } from "../../src/core/fleet.ts";
 import { main } from "../../src/cli.ts";
 
 function fleet(files: Record<string, string>): string {
@@ -246,5 +246,32 @@ describe("server set and the login", () => {
     expect(await main(["server", "set", "web-1", "--php", "8.5", "--fleet", d, "--json"])).toBe(1);
     expect(readFileSync(join(d, "servers/web-1.yaml"), "utf8")).toBe(before);
     expect(await main(["server", "set", "web-1", "--services", "nginx", "--fleet", d, "--json"])).toBe(1);
+  });
+});
+
+describe("redis and the next step", () => {
+  const dir = () => fleet({ "fornax.yaml": "version: 2\nfleet: t\n", "servers/web-1.yaml": "server: web-1\nhost: 203.0.113.10\nsites: {}\n" });
+  test("laravel sites get their own Redis, the other presets none unless asked", async () => {
+    const d = dir();
+    for (const [domain, preset, extra] of [["a.example.com", "laravel", []], ["b.example.com", "php", []], ["c.example.com", "php", ["--redis", "own"]]] as const) {
+      expect(await main(["site", "add", "web-1", domain, "--preset", preset, ...extra, "--fleet", d, "--json"])).toBe(0);
+    }
+    const f = loadFleet({ cwd: d });
+    const s = f.servers.get("web-1")!;
+    expect(["a.example.com", "b.example.com", "c.example.com"].map((x) => resolveSite(f, s, x).redis)).toEqual(["own", "none", "own"]);
+    expect(await main(["site", "set", "c.example.com", "--redis", "none", "--fleet", d, "--json"])).toBe(0);
+    expect(await main(["site", "set", "c.example.com", "--redis", "lots", "--fleet", d, "--json"])).toBe(1);
+  });
+  test("a server this fleet repo never planned as a whole is provisioned next, not planned", async () => {
+    const d = dir();
+    const out: string[] = [];
+    const write = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((c: string) => (out.push(String(c)), true)) as typeof process.stdout.write;
+    try {
+      expect(await main(["server", "set", "web-1", "--services", "redis,supervisor", "--fleet", d, "--json"])).toBe(0);
+    } finally {
+      process.stdout.write = write;
+    }
+    expect(JSON.parse(out.join("")).next).toBe("fornax server provision web-1");
   });
 });

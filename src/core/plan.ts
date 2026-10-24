@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FornaxError, fail } from "./errors.ts";
@@ -201,6 +201,23 @@ export const probeHash = (raw: string) => new Bun.CryptoHasher("sha256").update(
 export async function probe(fleet: Fleet, server: Server, resources: Resource[]): Promise<Probed> {
   const out = await runnerFor(fleet, server).run(probeScript(resources), { timeoutMs: 300_000 });
   return { states: parseProbe(out.stdout, resources), hash: probeHash(out.stdout) };
+}
+
+/**
+ * Whether this fleet repo ever planned the whole server (provision, or plan without --module/--site):
+ * before that, the next step for it is `fornax server provision`, not plan + apply.
+ */
+export function everPlannedWhole(fleet: Fleet, server: string): boolean {
+  const dir = join(fleet.dir, ".fornax", "plans");
+  if (!existsSync(dir)) return false;
+  return readdirSync(dir).some((f) => {
+    try {
+      const p = JSON.parse(readFileSync(join(dir, f), "utf8")) as Plan;
+      return p.server === server && !p.scope.modules.length && !p.scope.sites.length;
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function loadPlan(fleet: Fleet, id: string): Plan {

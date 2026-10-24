@@ -343,9 +343,9 @@ export function resolveSite(fleet: Fleet, server: Server, domain: string): Resol
   const db = s.db
     ? { engine: s.db.engine, name: s.db.name ?? dbBase, user: s.db.user ?? dbBase, extensions: s.db.extensions, manage: s.db.manage }
     : undefined;
-  // sites taken over keep the shared Redis their .env points at; PHP sites get their own, static and
-  // node ones none (a node app opts in with redis.instance and points its .env at the socket)
-  const redis = !server.services.includes("redis") ? "none" : (s.redis.instance ?? (s.adopted ? "shared" : s.preset === "static" || s.preset === "node" ? "none" : "own"));
+  // sites taken over keep the shared Redis their .env points at; Laravel sites get their own, the
+  // others none (they opt in with redis.instance and point their config at the socket)
+  const redis = !server.services.includes("redis") ? "none" : (s.redis.instance ?? (s.adopted ? "shared" : s.preset === "laravel" ? "own" : "none"));
   const node = s.preset === "node" && s.node ? { start: s.node.start.trim(), ports: nodePorts(domain, s.node.port) } : undefined;
   return { domain, spec: s, user, php, root, current, inPlace, webRoot, shared, names, certNames, tlsIssuer, db, redis, slug, ...(node ? { node } : {}) };
 }

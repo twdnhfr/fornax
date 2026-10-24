@@ -3,6 +3,7 @@ import { defineCommand } from "../core/command.ts";
 import { fail } from "../core/errors.ts";
 import { assertPolicies, editServerFile, getServer, loadFleet, writeServerFile, type Fleet } from "../core/fleet.ts";
 import { assertServerName } from "../core/names.ts";
+import { everPlannedWhole } from "../core/plan.ts";
 import { MODULES, SERVICES, type Server } from "../core/schema.ts";
 
 /** How fornax logs in to a server, said where it is set up: user, port and key. */
@@ -77,6 +78,7 @@ defineCommand({
     host: { type: "string", help: "IP or hostname fornax connects to with SSH" },
     "ssh-user": { type: "string", help: "the user fornax logs in as" },
     "ssh-port": { type: "number", help: "SSH port" },
+    "public-ipv4": { type: "string", help: "the address visitors reach it at, when --host is another (a tailnet or private IP): DNS records, site check --via public" },
     php: { type: "list", help: "PHP versions, e.g. 8.4,8.5" },
     services: { type: "list", help: `what the server runs (${SERVICES.join(",")}) — the full list, e.g. --services redis,supervisor,fail2ban` },
   },
@@ -84,7 +86,7 @@ defineCommand({
   async run(input, ctx) {
     const fleet = loadFleet(ctx);
     const server = getServer(fleet, String(input.name));
-    if (![input.host, input.sshUser, input.sshPort, input.php, input.services].some((v) => v !== undefined)) fail("missing_option", "nothing to change", "pass one or more options, e.g. --services redis,supervisor,fail2ban", "fornax server set --help");
+    if (![input.host, input.sshUser, input.sshPort, input.publicIpv4, input.php, input.services].some((v) => v !== undefined)) fail("missing_option", "nothing to change", "pass one or more options, e.g. --services redis,supervisor,fail2ban", "fornax server set --help");
     assertServices((input.services as string[] | undefined) ?? []);
     const changed: string[] = [];
     const path = fleet.files.get(server.server)!;
@@ -97,6 +99,7 @@ defineCommand({
       if (input.host !== undefined) set(["host"], String(input.host), `host ${input.host}`);
       if (input.sshUser !== undefined) set(["ssh", "user"], String(input.sshUser), `ssh.user ${input.sshUser}`);
       if (input.sshPort !== undefined) set(["ssh", "port"], Number(input.sshPort), `ssh.port ${input.sshPort}`);
+      if (input.publicIpv4 !== undefined) set(["public_ipv4"], String(input.publicIpv4), `public_ipv4 ${input.publicIpv4}`);
       if (input.php !== undefined) set(["php"], input.php, `php ${(input.php as string[]).join(", ")}`);
       if (input.services !== undefined) set(["services"], input.services, `services ${(input.services as string[]).join(", ")}`);
     });
@@ -112,9 +115,12 @@ defineCommand({
     const s = getServer(after, server.server);
     const dropped = server.services.filter((x) => !s.services.includes(x));
     const notes = dropped.length ? [`${dropped.join(", ")} stay installed where they already run: fornax manages what the config names, and does not remove a service with its data`] : [];
+    // a server not set up yet gets it all in one go; afterwards a change is planned and applied
+    const fresh = !everPlannedWhole(after, s.server);
+    const next = fresh ? `fornax server provision ${s.server}` : `fornax plan ${s.server}`;
     return {
-      data: { server: s.server, file: path, changed, login: loginLine(after, s), notes, next: `fornax plan ${s.server}` },
-      human: [...changed.map((c) => `~ ${c}`), loginLine(after, s), ...notes.map((n) => `note: ${n}`), `next: fornax plan ${s.server}, then fornax apply <plan-id>`].join("\n"),
+      data: { server: s.server, file: path, changed, login: loginLine(after, s), notes, next },
+      human: [...changed.map((c) => `~ ${c}`), loginLine(after, s), ...notes.map((n) => `note: ${n}`), `next: ${next}${fresh ? "   (not set up from this fleet repo yet: installs and configures everything)" : ", then fornax apply <plan-id>"}`].join("\n"),
     };
   },
 });

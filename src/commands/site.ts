@@ -4,6 +4,7 @@ import { fail } from "../core/errors.ts";
 import type YAML from "yaml";
 import { detectPreset, remoteBranches } from "../core/detect.ts";
 import { assertPolicies, editServerFile, findSite, getServer, isProtected, loadFleet, repoOwner, sites } from "../core/fleet.ts";
+import { everPlannedWhole } from "../core/plan.ts";
 import { hasPublicDns, isIPv4, previewName, sslipDomain } from "../core/names.ts";
 import { PRESETS, type Server } from "../core/schema.ts";
 import type { Fleet } from "../core/fleet.ts";
@@ -79,6 +80,7 @@ defineCommand({
     user: { type: "string", help: "Linux user (default: first label of the domain)" },
     db: { type: "string", help: "create a database: mysql | postgres" },
     alias: { type: "list", help: "additional domains" },
+    redis: { type: "string", help: "own (a Redis only this site reaches) | shared (the server's) | none — default: own for laravel, none for the other presets" },
     tls: { type: "string", help: "letsencrypt | selfsigned | none (default: tls.issuer in fornax.yaml — letsencrypt in a new fleet; selfsigned for names without public DNS: .test, .local, a private IP's sslip.io name)" },
     www: { type: "boolean", help: "redirect www.<domain> to <domain>" },
     daemon: { type: "list", help: "daemon command(s), e.g. 'php artisan horizon'" },
@@ -130,6 +132,10 @@ defineCommand({
       site.db = { engine: String(input.db) };
     }
     if ((input.alias as string[] | undefined)?.length) site.aliases = input.alias;
+    if (input.redis !== undefined) {
+      if (!["own", "shared", "none"].includes(String(input.redis))) fail("invalid_option", "--redis must be own, shared or none");
+      site.redis = { instance: String(input.redis) };
+    }
     const auto = input.tls ? {} : tlsFor(fleet, [domain, ...((input.alias as string[] | undefined) ?? []), ...(input.www ? [`www.${domain}`] : [])]);
     if (input.tls || auto.issuer) site.tls = { issuer: String(input.tls ?? auto.issuer) };
     if (input.www) site.www_redirect = true;
@@ -147,20 +153,22 @@ defineCommand({
     assertPolicies(after, getServer(after, server.server));
     const { site: resolved } = findSite(after, domain);
     // the first site on a server comes with the server's own setup (nginx, PHP …); later ones are a plan
-    const first = sites(after, getServer(after, server.server)).filter((x) => x.spec.state === "present").length === 1;
+    const first = sites(after, getServer(after, server.server)).filter((x) => x.spec.state === "present").length === 1 || !everPlannedWhole(after, server.server);
     const next = first ? `fornax server provision ${server.server}` : `fornax plan ${server.server} --site ${domain}`;
     // a server set up for its first site: databases nobody asked for are said before provision installs them
     const srv = getServer(after, server.server);
     const unused = first && !/^services:/m.test(readFileSync(path, "utf8")) ? (["mysql", "postgres"] as const).filter((x) => srv.services.includes(x) && !sites(after, srv).some((y) => y.db?.engine === x)) : [];
     const lean = unused.length ? `provision would also install ${unused.join(" and ")}, which no site uses — leave ${unused.length > 1 ? "them" : "it"} out: fornax server set ${server.server} --services ${srv.services.filter((x) => !(unused as string[]).includes(x)).join(",")}` : undefined;
-    const notes = [chosen.note, auto.note, runtime, lean].filter(Boolean) as string[];
+    // a deploy clones on the server: a path in the repo is one there, whatever fornax read here
+    const local = input.repo && /^(file:\/\/|\/)/.test(String(input.repo)) ? `${input.repo} is a path on the server: the deploy clones it there (fornax read it here for the preset only) — the server needs that path, e.g. a bare repo you push to; GitHub repos deploy on every push` : undefined;
+    const notes = [chosen.note, auto.note, runtime, lean, local].filter(Boolean) as string[];
     return {
       data: { added: domain, server: server.server, file: path, preset: resolved.spec.preset, user: resolved.user, php: resolved.php, root: resolved.root, serves: resolved.webRoot, tls: resolved.tlsIssuer, notes, next },
       human: [
         `added ${domain} to ${server.server} (${path})`,
         `preset ${resolved.spec.preset}, user ${resolved.user}, ${resolved.node ? `runs '${resolved.node.start}' behind nginx` : `php ${resolved.php}, serves ${resolved.webRoot}`}, tls ${resolved.tlsIssuer}`,
         ...notes.map((n) => `note: ${n}`),
-        `next: ${next}${first ? "   (the server's first site: installs and configures everything, then the site)" : ", then fornax apply <plan-id>"}`,
+        `next: ${next}${first ? "   (the server is not set up from this fleet repo yet: installs and configures everything, then the site)" : ", then fornax apply <plan-id>"}`,
       ].join("\n"),
     };
   },
@@ -182,12 +190,14 @@ defineCommand({
     www: { type: "boolean", help: "redirect www.<domain> to <domain> (--no-www: stop)" },
     schedule: { type: "boolean", help: "run the Laravel scheduler every minute (--no-schedule: stop)" },
     "health-check": { type: "string", help: "path a new release must answer before it goes live, e.g. /up" },
+    redis: { type: "string", help: "own | shared | none" },
   },
   examples: ["fornax site set shop.example.com --preset php", "fornax site set docs.example.com --preset static --web-dir dist", "fornax site set app.example.com --tls selfsigned --no-www"],
   async run(input, ctx) {
     const fleet = loadFleet(ctx);
     const { server, site } = findSite(fleet, String(input.site));
-    const keys = ["preset", "webDir", "start", "php", "tls", "repo", "branch", "www", "schedule", "healthCheck"];
+    const keys = ["preset", "webDir", "start", "php", "tls", "repo", "branch", "www", "schedule", "healthCheck", "redis"];
+    if (input.redis !== undefined && !["own", "shared", "none"].includes(String(input.redis))) fail("invalid_option", "--redis must be own, shared or none");
     if (!keys.some((k) => input[k] !== undefined)) fail("missing_option", "nothing to change", "pass one or more options, e.g. --preset php", `fornax site set --help`);
     if (input.preset !== undefined && !(PRESETS as readonly string[]).includes(String(input.preset))) fail("invalid_option", `unknown preset "${input.preset}"`, `one of: ${PRESETS.join(", ")}`);
     if (input.tls !== undefined && !["letsencrypt", "selfsigned", "none"].includes(String(input.tls))) fail("invalid_option", "--tls must be letsencrypt, selfsigned or none");
@@ -228,6 +238,7 @@ defineCommand({
       if (input.branch !== undefined) set(["branch"], String(input.branch), `branch ${input.branch}`);
       if (input.www !== undefined) set(["www_redirect"], Boolean(input.www), `www_redirect ${Boolean(input.www)}`);
       if (input.schedule !== undefined) set(["schedule"], Boolean(input.schedule), `schedule ${Boolean(input.schedule)}`);
+      if (input.redis !== undefined) set(["redis", "instance"], String(input.redis), `redis ${input.redis}`);
       if (input.healthCheck !== undefined) set(["health_check"], String(input.healthCheck), `health_check ${input.healthCheck}`);
     });
     // the fleet as a whole decides (PHP versions, tools, policies): a change it refuses is undone
@@ -240,10 +251,11 @@ defineCommand({
     }
     const { site: resolved } = findSite(loadFleet(ctx), site.domain);
     const notes = [found, runtime].filter(Boolean) as string[];
-    const next = `fornax plan ${server.server} --site ${site.domain}`;
+    const fresh = !everPlannedWhole(loadFleet(ctx), server.server);
+    const next = fresh ? `fornax server provision ${server.server}` : `fornax plan ${server.server} --site ${site.domain}`;
     return {
       data: { site: site.domain, server: server.server, file: path, changed, preset: resolved.spec.preset, serves: resolved.webRoot, tls: resolved.tlsIssuer, notes, next },
-      human: [...changed.map((c) => `~ ${c}`), `${resolved.node ? `runs '${resolved.node.start}' behind nginx` : `serves ${resolved.webRoot}`}, tls ${resolved.tlsIssuer}`, ...notes.map((n) => `note: ${n}`), `next: ${next}, then fornax apply <plan-id> (and fornax deploy ${site.domain} if the build changes)`].join("\n"),
+      human: [...changed.map((c) => `~ ${c}`), `${resolved.node ? `runs '${resolved.node.start}' behind nginx` : `serves ${resolved.webRoot}`}, tls ${resolved.tlsIssuer}`, ...notes.map((n) => `note: ${n}`), `next: ${next}${fresh ? "   (the server is not set up from this fleet repo yet: installs and configures everything)" : `, then fornax apply <plan-id> (and fornax deploy ${site.domain} if the build changes)`}`].join("\n"),
     };
   },
 });

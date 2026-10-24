@@ -761,7 +761,7 @@ false: the database exists already (e.g. made by Forge) and stays the app's — 
 
 object · optional
 
-Redis for the site. "own" (default; adopted sites: "shared"): a Redis server only this site can reach — a unix socket in a directory of the site user, so no other site reads its cache, sessions or queues. "shared": the server's Redis on 127.0.0.1:6379 (all sites, one password). "none": the site uses no Redis (cache, queue and sessions in the database or files).
+Redis for the site. "own" (default for preset laravel; adopted sites: "shared"; php, static and node: "none"): a Redis server only this site can reach — a unix socket in a directory of the site user, so no other site reads its cache, sessions or queues. "shared": the server's Redis on 127.0.0.1:6379 (all sites, one password). "none": the site uses no Redis (cache, queue and sessions in the database or files).
 
 ### `sites.<domain>.redis.instance`
 

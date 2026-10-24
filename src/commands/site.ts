@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { defineCommand, requireConfirm } from "../core/command.ts";
 import { fail } from "../core/errors.ts";
 import type YAML from "yaml";
-import { detectPreset } from "../core/detect.ts";
+import { detectPreset, remoteBranches } from "../core/detect.ts";
 import { assertPolicies, editServerFile, findSite, getServer, isProtected, loadFleet, repoOwner, sites } from "../core/fleet.ts";
 import { hasPublicDns, isIPv4, previewName, sslipDomain } from "../core/names.ts";
 import { PRESETS, type Server } from "../core/schema.ts";
@@ -29,6 +29,15 @@ function tlsFor(fleet: Fleet, names: string[]): { issuer?: "selfsigned"; note?: 
   const local = names.find((n) => !hasPublicDns(n));
   if (!local || fleet.config.tls.issuer !== "letsencrypt" || fleet.config.tls.acme_server) return {};
   return { issuer: "selfsigned", note: `tls selfsigned: ${local} has no public DNS a CA could check (--tls letsencrypt to override)` };
+}
+
+/** A branch the repo does not have is refused now, not at the first deploy (when the repo can be read from here). */
+function assertBranch(repo: string, branch: string, retry: (b: string) => string): void {
+  const branches = remoteBranches(repo);
+  if (!branches || branches.includes(branch)) return;
+  if (!branches.length) fail("unknown_branch", `${repo} has no branches yet — nothing to deploy`, "push a first commit");
+  const guess = branches.find((b) => b === "main" || b === "master") ?? branches[0]!;
+  fail("unknown_branch", `${repo} has no branch "${branch}"`, `its branches: ${branches.slice(0, 10).join(", ")}${branches.length > 10 ? ", …" : ""}`, retry(guess));
 }
 
 /** The preset a site gets: what it was told, else what its repo looks like, else laravel. */
@@ -104,6 +113,7 @@ defineCommand({
         fail("policy_violation", `repo "${input.repo}" is not owned by ${allowed.join(" or ")}`, "this fleet's policies.allowed_repo_owners forbids it");
       }
     }
+    if (input.repo) assertBranch(String(input.repo), String(input.branch), (b) => `fornax site add ${server.server} ${input.domain ?? "--preview"} --repo ${input.repo} --branch ${b}`);
     const chosen = choosePreset(input, input.repo ? String(input.repo) : undefined, String(input.branch));
     const site: Record<string, unknown> = {};
     if (input.repo) site.repo = String(input.repo);
@@ -139,7 +149,11 @@ defineCommand({
     // the first site on a server comes with the server's own setup (nginx, PHP …); later ones are a plan
     const first = sites(after, getServer(after, server.server)).filter((x) => x.spec.state === "present").length === 1;
     const next = first ? `fornax server provision ${server.server}` : `fornax plan ${server.server} --site ${domain}`;
-    const notes = [chosen.note, auto.note, runtime].filter(Boolean) as string[];
+    // a server set up for its first site: databases nobody asked for are said before provision installs them
+    const srv = getServer(after, server.server);
+    const unused = first && !/^services:/m.test(readFileSync(path, "utf8")) ? (["mysql", "postgres"] as const).filter((x) => srv.services.includes(x) && !sites(after, srv).some((y) => y.db?.engine === x)) : [];
+    const lean = unused.length ? `provision would also install ${unused.join(" and ")}, which no site uses — leave ${unused.length > 1 ? "them" : "it"} out: fornax server set ${server.server} --services ${srv.services.filter((x) => !(unused as string[]).includes(x)).join(",")}` : undefined;
+    const notes = [chosen.note, auto.note, runtime, lean].filter(Boolean) as string[];
     return {
       data: { added: domain, server: server.server, file: path, preset: resolved.spec.preset, user: resolved.user, php: resolved.php, root: resolved.root, serves: resolved.webRoot, tls: resolved.tlsIssuer, notes, next },
       human: [
@@ -179,6 +193,8 @@ defineCommand({
     if (input.tls !== undefined && !["letsencrypt", "selfsigned", "none"].includes(String(input.tls))) fail("invalid_option", "--tls must be letsencrypt, selfsigned or none");
     const allowed = fleet.config.policies.allowed_repo_owners;
     if (input.repo && allowed && !allowed.includes(repoOwner(String(input.repo)) ?? "")) fail("policy_violation", `repo "${input.repo}" is not owned by ${allowed.join(" or ")}`, "this fleet's policies.allowed_repo_owners forbids it");
+    const repo = input.repo ?? site.spec.repo;
+    if (repo && (input.repo !== undefined || input.branch !== undefined)) assertBranch(String(repo), String(input.branch ?? site.spec.branch), (b) => `fornax site set ${site.domain} --branch ${b}`);
     const preset = String(input.preset ?? site.spec.preset);
     let start = input.start !== undefined ? String(input.start) : site.spec.node?.start;
     let found = "";

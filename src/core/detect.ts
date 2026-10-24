@@ -37,17 +37,33 @@ export function presetFromFiles(files: string[], pkg?: Pkg): Detected {
   return { preset: "static", why: "no app entry point (artisan, index.php, a start script)" };
 }
 
+/** How this machine reads a repo: GitHub over HTTPS (never SSH, where a key agent may ask for a touch); other SSH repos not at all. */
+function readableUrl(repo: string): string | undefined {
+  const r = repoUrl(repo);
+  return r.github ? `https://github.com/${r.github}.git` : r.ssh ? undefined : r.url;
+}
+
+const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "true", SSH_ASKPASS: "true" });
+
+/** The repo's branches as seen from here; undefined when it cannot be read from here (private, SSH, offline). */
+export function remoteBranches(repo: string): string[] | undefined {
+  const url = readableUrl(repo);
+  if (!url) return undefined;
+  const p = Bun.spawnSync(["git", "ls-remote", "--heads", "--", url], { env: gitEnv(), timeout: 20_000, stderr: "pipe" });
+  if (p.exitCode !== 0) return undefined;
+  return p.stdout.toString().split("\n").map((l) => l.split("refs/heads/")[1]).filter((b): b is string => Boolean(b));
+}
+
 /**
  * Look at the repo from this machine, with its own git access: a shallow clone without file
  * contents, then the few files that decide. GitHub repos go over HTTPS (public ones, or with a
  * stored credential) — never over SSH, where a key agent may ask for a touch or an approval.
  */
 export function detectPreset(repo: string, branch: string): Detected | { error: string } {
-  const r = repoUrl(repo);
-  const url = r.github ? `https://github.com/${r.github}.git` : r.url;
-  if (!r.github && r.ssh) return { error: "an SSH repo is not read from here" };
+  const url = readableUrl(repo);
+  if (!url) return { error: "an SSH repo is not read from here" };
   const dir = mkdtempSync(join(tmpdir(), "fornax-detect-"));
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "true", SSH_ASKPASS: "true" };
+  const env = gitEnv();
   const git = (...args: string[]) => Bun.spawnSync(["git", "-C", dir, ...args], { env, timeout: 20_000, stderr: "pipe" });
   try {
     const clone = Bun.spawnSync(["git", "clone", "--quiet", "--depth", "1", "--filter=blob:none", "--no-checkout", "--branch", branch, "--", url, dir], { env, timeout: 30_000, stderr: "pipe" });

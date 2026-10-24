@@ -215,7 +215,7 @@ oneShot(
   },
 );
 
-oneShot("server provision", "install and configure everything the config describes (all modules and sites)", () => ({ modules: [], sites: [] }), (fleet, server) => {
+oneShot("server provision", "first setup: install and configure everything the config describes (all modules and sites) — plan and apply in one step (--dry-run shows the plan); later changes go through fornax plan + apply", () => ({ modules: [], sites: [] }), (fleet, server) => {
   // the code is not there yet: a provisioned site serves nothing until its first deploy
   const deploying = sites(fleet, server).filter((s) => s.spec.state === "present" && s.spec.deploy.enabled && s.spec.repo);
   return deploying.length ? `\nnext: ${deploying.map((s) => `fornax deploy ${s.domain}`).join(", ")}   (first deploy of each site; afterwards every push, after fornax git connect)` : "";

@@ -166,13 +166,36 @@ describe("sites without a domain of their own", () => {
     expect(await main(["site", "add", "web-1", "own.test", "--preset", "static", "--tls", "none", "--fleet", dir, "--json"])).toBe(0);
     expect(added(dir, "own.test").tls.issuer).toBe("none");
   });
-  test("site add reads the preset off the repo", async () => {
+  const phpRepo = () => {
     const repo = mkdtempSync(join(tmpdir(), "fornax-repo-"));
     const git = (...a: string[]) => Bun.spawnSync(["git", "-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", ...a]);
     git("init", "-q", "-b", "main");
     writeFileSync(join(repo, "index.php"), "<?php echo 1;\n");
     git("add", ".");
     git("commit", "-qm", "x");
+    return repo;
+  };
+  test("a branch the repo does not have is refused when the site is added", async () => {
+    const repo = phpRepo();
+    const dir = plain();
+    expect(await main(["site", "add", "web-1", "app.example.com", "--repo", `file://${repo}`, "--branch", "master", "--fleet", dir, "--json"])).toBe(1);
+    expect(loadFleet({ cwd: dir }).servers.get("web-1")!.sites["app.example.com"]).toBeUndefined();
+  });
+  test("the first site says which databases provision would install for nobody", async () => {
+    const dir = plain();
+    const out: string[] = [];
+    const write = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((c: string) => (out.push(String(c)), true)) as typeof process.stdout.write;
+    try {
+      expect(await main(["site", "add", "web-1", "app.example.com", "--preset", "php", "--db", "postgres", "--fleet", dir, "--json"])).toBe(0);
+    } finally {
+      process.stdout.write = write;
+    }
+    const notes = JSON.parse(out.join("")).notes as string[];
+    expect(notes.find((n) => n.includes("provision would also install"))).toContain("mysql, which no site uses — leave it out: fornax server set web-1 --services postgres,redis,supervisor,fail2ban");
+  });
+  test("site add reads the preset off the repo", async () => {
+    const repo = phpRepo();
     const dir = plain();
     expect(await main(["site", "add", "web-1", "app.example.com", "--repo", `file://${repo}`, "--fleet", dir, "--json"])).toBe(0);
     expect(added(dir, "app.example.com")).toMatchObject({ preset: "php", web_dir: "." });
@@ -203,5 +226,25 @@ describe("site set", () => {
     expect(await main(["site", "set", "shop.example.com", "--php", "7.0", "--fleet", d, "--json"])).toBe(1);
     expect(readFileSync(join(d, "servers/web-1.yaml"), "utf8")).toBe(before);
     expect(await main(["site", "set", "shop.example.com", "--fleet", d, "--json"])).toBe(1);
+  });
+});
+
+describe("server set and the login", () => {
+  const dir = () => fleet({ "fornax.yaml": "version: 2\nfleet: t\n", "servers/web-1.yaml": server });
+  test("server add names the login and takes --ssh-user/--ssh-port", async () => {
+    const d = dir();
+    expect(await main(["server", "add", "web-2", "--host", "203.0.113.11", "--ssh-user", "ubuntu", "--ssh-port", "2222", "--fleet", d, "--json"])).toBe(0);
+    expect(loadFleet({ cwd: d }).servers.get("web-2")!.ssh).toEqual({ user: "ubuntu", port: 2222 });
+  });
+  test("server set changes services and PHP; a change the fleet refuses is undone", async () => {
+    const d = dir();
+    expect(await main(["server", "set", "web-1", "--services", "redis,supervisor", "--php", "8.4,8.5", "--fleet", d, "--json"])).toBe(0);
+    expect(loadFleet({ cwd: d }).servers.get("web-1")!).toMatchObject({ services: ["redis", "supervisor"], php: ["8.4", "8.5"] });
+    // a site pinned to PHP 8.4 keeps the server from dropping it
+    expect(await main(["site", "set", "shop.example.com", "--php", "8.4", "--fleet", d, "--json"])).toBe(0);
+    const before = readFileSync(join(d, "servers/web-1.yaml"), "utf8");
+    expect(await main(["server", "set", "web-1", "--php", "8.5", "--fleet", d, "--json"])).toBe(1);
+    expect(readFileSync(join(d, "servers/web-1.yaml"), "utf8")).toBe(before);
+    expect(await main(["server", "set", "web-1", "--services", "nginx", "--fleet", d, "--json"])).toBe(1);
   });
 });

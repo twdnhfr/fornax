@@ -83,7 +83,7 @@ defineCommand({
         }
       }
     }
-    const cert = site.tlsIssuer === "none" ? "" : Bun.spawnSync(["bash", "-c", `echo | openssl s_client -connect ${addr}:443 -servername ${site.domain} 2>/dev/null | openssl x509 -noout -issuer -enddate -ext subjectAltName 2>/dev/null`], { timeout: 15_000 }).stdout.toString();
+    const cert = site.tlsIssuer === "none" ? "" : Bun.spawnSync(["bash", "-c", `openssl s_client -connect ${addr}:443 -servername ${site.domain} 2>/dev/null | openssl x509 -noout -issuer -enddate -ext subjectAltName 2>/dev/null`], { stdin: "ignore", timeout: 15_000 }).stdout.toString();
     const issuer = cert.match(/issuer=.*?(?:O\s*=\s*([^,\n]+))?.*?CN\s*=\s*([^\n]+)/)?.slice(1).filter(Boolean).join(" / ") ?? null;
     const expires = cert.match(/notAfter=(.*)/)?.[1] ?? null;
     const human = [

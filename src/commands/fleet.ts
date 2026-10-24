@@ -87,7 +87,7 @@ defineCommand({
   examples: ["fornax agent-context", "fornax agent-context --json"],
   async run(_input, ctx) {
     const cmds = commands()
-      .filter((c) => !c.internal)
+      .filter((c) => !c.internal && !c.humanOnly)
       .map((c) => ({
         command: `fornax ${c.name}`,
         tier: c.tier,

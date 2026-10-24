@@ -14,6 +14,7 @@ defineCommand({
   name: "ui",
   summary: "local web dashboard for humans (127.0.0.1 only): fleet overview, status, health, logs, new site → plan → apply, deploy — the same commands, tiers and errors as the CLI",
   tier: "read",
+  humanOnly: true,
   options: {
     port: { type: "number", help: "port on 127.0.0.1 (default: a random free one)" },
     open: { type: "boolean", help: "open the browser (--no-open: only print the URL)", default: true },

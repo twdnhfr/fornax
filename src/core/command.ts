@@ -61,6 +61,8 @@ export interface CommandDef {
   options?: Record<string, OptionSpec>;
   /** Runs on the server only (deploy machinery); hidden from agent-context lists. */
   internal?: boolean;
+  /** For people at a keyboard (e.g. the dashboard): left out of agent-context, agents use the commands. */
+  humanOnly?: boolean;
   /** Example invocations for help and agent-context. */
   examples?: string[];
   run(input: Input, ctx: Context): Promise<Result>;

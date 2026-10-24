@@ -167,7 +167,7 @@ export async function serverHealth(fleet: Fleet, server: Server): Promise<{ serv
   }
 
   // network: what listens beyond the machine, and what of it the internet actually reaches
-  const unusual = unusualListeners(all(f, "listen"), server.firewall.allow.map((a) => a.port));
+  const unusual = unusualListeners(all(f, "listen"), server.firewall.allow.flatMap((a) => (a.port === undefined ? [] : [a.port])));
   add("listening", unusual.length ? "warn" : "ok", unusual.length ? `beyond localhost — the firewall keeps the internet out (see "exposed"), but machines the tailnet policy lets in reach them: ${unusual.map((u) => `${u.proc} ${u.address}:${u.port}/${u.proto}`).join(", ")}` : "only nginx (80/443), SSH and Tailscale beyond localhost");
   const publicAddrs = [server.public_ipv4, server.public_ipv6].filter((a): a is string => Boolean(a));
   if (publicAddrs.length) {

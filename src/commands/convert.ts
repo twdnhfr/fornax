@@ -1,7 +1,11 @@
 import { defineCommand } from "../core/command.ts";
 import { fail } from "../core/errors.ts";
 import { findSite, loadFleet } from "../core/fleet.ts";
+import { readFileSync, writeFileSync } from "node:fs";
+import { assertPolicies, editServerFile, getServer } from "../core/fleet.ts";
+import { MODULES } from "../core/schema.ts";
 import { AREAS, convertSite, removeFiles, unusedAdoptedFiles, type Area } from "../forge/convert.ts";
+import { planConversion, readServer, type ServerArea } from "../forge/server-convert.ts";
 
 defineCommand({
   name: "site convert",
@@ -103,5 +107,51 @@ defineCommand({
       ...(missing.length ? [`  ! does not cover: ${missing.join(", ")}`] : []),
     ].join("\n");
     return { data: { site: site.domain, via: addr, results, certificate: { issuer, expires, names, missing } }, human, exitCode: results.some((r) => !r.status || r.status >= 500) ? 1 : 0 };
+  },
+});
+
+defineCommand({
+  name: "server convert",
+  summary: "hand a taken-over server's own configuration (nginx.conf, PHP, firewall, Redis, MySQL …) to fornax, module by module — reads the server, keeps what it finds in the fleet repo, switches the modules on; plan + apply do the rest",
+  tier: "write",
+  args: [{ name: "server", help: "server name", required: true }],
+  options: {
+    only: { type: "list", help: `modules to switch on: ${MODULES.join(",")}` },
+    "dry-run": { type: "boolean", help: "read the server and show what would go into the fleet repo, change nothing" },
+  },
+  examples: ["fornax server convert web-1 --only base,security --dry-run", "fornax server convert web-1 --only base,security", "fornax plan web-1 --module base,security"],
+  async run(input, ctx) {
+    const fleet = loadFleet(ctx);
+    const server = getServer(fleet, String(input.server));
+    const areas = (input.only as string[] | undefined) ?? [];
+    if (!areas.length) fail("missing_option", "--only is required", `convert step by step, one or a few modules at a time: ${MODULES.join(", ")}`, `fornax server convert ${server.server} --only base,security --dry-run`);
+    for (const a of areas) if (!(MODULES as readonly string[]).includes(a)) fail("invalid_option", `unknown module "${a}"`, `one of: ${MODULES.join(", ")}`);
+    ctx.log(`reading ${server.server} …`);
+    const facts = await readServer(fleet, server);
+    const conv = planConversion(fleet, server, facts, areas as ServerArea[]);
+    const modules = MODULES.filter((m) => server.modules.includes(m) || areas.includes(m));
+    const next = `fornax plan ${server.server} --module ${MODULES.filter((m) => areas.includes(m)).join(",")}`;
+    const human = (done: string) =>
+      [
+        `${server.server}: ${done}`,
+        ...conv.changes.map((c) => `  ${c}`),
+        ...conv.warnings.map((w) => `  ! ${w}`),
+        input.dryRun ? `nothing written — without --dry-run: fornax server convert ${server.server} --only ${areas.join(",")}` : `next: ${next}  (review every change, then fornax apply <plan-id>)`,
+      ].join("\n");
+    if (input.dryRun) return { data: { server: server.server, modules, dry_run: true, ...conv, next: null }, human: human(`would switch on ${areas.join(", ")} and keep in the fleet repo:`) };
+    const path = fleet.files.get(server.server)!;
+    const before = readFileSync(path, "utf8");
+    editServerFile(fleet, server.server, (doc) => {
+      for (const [p, v] of conv.set) doc.setIn(p, typeof v === "object" && v !== null ? doc.createNode(v) : v);
+      doc.setIn(["modules"], doc.createNode(modules));
+    });
+    try {
+      const after = loadFleet(ctx);
+      assertPolicies(after, getServer(after, server.server));
+    } catch (e) {
+      writeFileSync(path, before);
+      throw e;
+    }
+    return { data: { server: server.server, modules, file: path, ...conv, next }, human: human(`switched on ${areas.join(", ")} (modules: [${modules.join(", ")}]); kept from the server:`) };
   },
 });

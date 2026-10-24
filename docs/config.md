@@ -43,6 +43,8 @@ The oldest fornax this fleet may be used with, e.g. ">=0.2.0": an older one refu
 
 string · required
 
+Name of the fleet (`fornax init` sets it, default: the directory name). It appears in 1Password item titles ("fornax &lt;fleet> &lt;server>"), in backup paths on the Storage Box (&lt;path>/&lt;fleet>/&lt;server>) and in the default vault name fornax-&lt;fleet>.
+
 ### `preview_domain`
 
 string (a lower-case host name; not an IP address (&lt;ip with dashes>.sslip.io is a name for one, e.g. 192-0-2-10.sslip.io)) · optional
@@ -52,6 +54,8 @@ A domain of yours whose subdomains reach the fleet's servers (a wildcard record,
 ### `access`
 
 one of `"ssh"`, `"tailscale"` · default `"ssh"`
+
+How fornax reaches the servers. "ssh": over SSH on `host`, and ufw opens ssh.port (to firewall.ssh_from). "tailscale": servers join the tailnet (see `tailscale`), and ufw lets SSH in only from the tailnet.
 
 ### `admin_user`
 
@@ -63,17 +67,25 @@ Linux admin user on servers fornax sets up (default "fornax"; servers from befor
 
 object · optional
 
+How fornax logs in to the servers. A server's own `ssh:` overrides user, port and sudo_password.
+
 ### `ssh.user`
 
 string · default `"root"`
+
+The user fornax logs in as. Any user other than root needs sudo: passwordless, or with sudo_password.
 
 ### `ssh.port`
 
 whole number · default `22`
 
+SSH port fornax connects to; with access "ssh", ufw keeps it open.
+
 ### `ssh.identity_file`
 
 string · optional
+
+Private key file fornax logs in with (only this key, not your agent's). ~/ is your home directory; other relative paths are relative to the fleet repo. Its .pub goes to servers that `server create` orders. Without it (and without key): your ssh-agent and ~/.ssh/config.
 
 ### `ssh.key`
 
@@ -84,6 +96,8 @@ The fleet's SSH key as a secret reference (`fornax secrets setup` makes one in t
 ### `ssh.known_hosts_file`
 
 string · optional
+
+known_hosts file for the servers' host keys (default ~/.ssh/known_hosts; relative paths are relative to the fleet repo). A new host key is accepted on first contact; fornax drops stale entries when it orders or reinstalls a server.
 
 ### `ssh.config_file`
 
@@ -125,17 +139,25 @@ For a non-root user: secret reference of its sudo password (omit for passwordles
 
 map of `<option>` to strings (a single line) · default `{}`
 
+Extra OpenSSH options for every connection, passed as `-o Name=value`, e.g. { ServerAliveCountMax: "6" }.
+
 ### `policies`
 
 object · optional
+
+Rules fornax checks before it changes anything.
 
 ### `policies.allowed_repo_owners`
 
 list of strings · optional
 
+GitHub users or organisations whose repos sites may deploy (the owner in owner/name or a git URL). Adding or changing a site, plan and apply refuse any other repo. Unset: any owner.
+
 ### `policies.protected`
 
 list of strings · default `[]`
+
+Site domains and server names fornax refuses to delete (site remove, server destroy, a plan that purges a site) while they are on this list.
 
 ### `policies.maintenance_window`
 
@@ -147,13 +169,19 @@ UTC window "HH:MM-HH:MM" for server changes (apply, bootstrap, provision). App d
 
 object · optional
 
+Certificate defaults for the fleet; a site's own tls.issuer takes precedence.
+
 ### `tls.issuer`
 
 one of `"letsencrypt"`, `"selfsigned"`, `"none"` · default `"letsencrypt"`
 
+Certificates for sites without a tls.issuer of their own, and for a webhook domain: "letsencrypt" (certbot, HTTP challenge), "selfsigned" (made on the server) or "none" (plain HTTP).
+
 ### `tls.email`
 
 string · optional
+
+Contact address for the ACME account (certbot --email). Without it, fornax registers with no address.
 
 ### `tls.acme_server`
 
@@ -171,17 +199,25 @@ CA bundle on the server to trust the ACME server (test CAs like Pebble).
 
 object · optional
 
+DNS adapter: `fornax dns sync` points the A/AAAA records of every site name (and webhook domain) at its server's public_ipv4/public_ipv6; `fornax dns status` compares them. Without it, you set the records by hand.
+
 ### `dns.type`
 
 string · required
+
+The DNS provider; only "cloudflare" so far (records are created DNS only, not proxied).
 
 ### `dns.credentials`
 
 string · required
 
+Secret reference to the provider's API token (Cloudflare: Zone:Read and DNS:Edit on the zones).
+
 ### `dns.zones`
 
 list of strings · default `[]`
+
+Zones fornax may use, e.g. [example.com]. When set, names outside them are refused; when empty, the provider is asked for each parent domain of a name.
 
 ### `tailscale`
 
@@ -235,17 +271,25 @@ Internet-facing servers reach nothing in the tailnet but its DNS servers — exc
 
 string (a machine name or tag) · required
 
+The machine that may connect: a machine name in the tailnet (first label of its MagicDNS name) or a tag such as tag:server. `fornax tailnet sync` fails on a machine it cannot find.
+
 ### `tailscale.allow[].to`
 
 string (a machine name or tag) · required
+
+The machine it may reach: a machine name in the tailnet or a tag.
 
 ### `tailscale.allow[].ports`
 
 list of whole numbers from 1 to 65535, at least 1 entry · required
 
+Ports on `to` that `from` may reach, e.g. [8000].
+
 ### `tailscale.allow[].why`
 
 string (a single line) · required
+
+Why the rule exists. It is for the reader of fornax.yaml and is not written into the tailnet policy.
 
 ### `onepassword`
 
@@ -257,9 +301,13 @@ object · optional
 
 string · required
 
+The vault fornax writes its generated secrets to, one item per server ("fornax &lt;fleet> &lt;server>"). `fornax secrets setup` sets it (default fornax-&lt;fleet>). With service_account, op:// references to other vaults go through the 1Password app.
+
 ### `onepassword.account`
 
 string · optional
+
+1Password account for the op CLI (`op --account`) when you are signed in to more than one. Not used for calls made with service_account.
 
 ### `onepassword.auto_sync`
 
@@ -289,17 +337,25 @@ Nightly backups with restic to a Hetzner Storage Box.
 
 object · required
 
+The Hetzner Storage Box the restic repositories live on, reached over SFTP. Each server logs in with a key of its own.
+
 ### `backup.storage_box.host`
 
 string (a lower-case host name) · required
+
+Host name of the box, e.g. u123456.your-storagebox.de.
 
 ### `backup.storage_box.user`
 
 string (letters, digits and . - _ only) · required
 
+Login of the box, e.g. u123456 (or a sub-account).
+
 ### `backup.storage_box.port`
 
 whole number · default `23`
+
+SSH port of the box (Hetzner Storage Boxes: 23).
 
 ### `backup.storage_box.password`
 
@@ -323,17 +379,25 @@ Daily start time, UTC.
 
 object · optional
 
+Which snapshots restic keeps for each site after a backup (restic forget --prune).
+
 ### `backup.keep.daily`
 
 whole number, at least 1 · default `7`
+
+Number of daily snapshots to keep.
 
 ### `backup.keep.weekly`
 
 whole number, at least 0 · default `4`
 
+Number of weekly snapshots to keep.
+
 ### `backup.keep.monthly`
 
 whole number, at least 0 · default `6`
+
+Number of monthly snapshots to keep.
 
 ### `backup.heartbeat`
 
@@ -357,6 +421,8 @@ An encrypted copy of this fleet repo on the servers (fleet-copy.ts): after every
 
 list of strings (an age recipient (age1…)), at least 1 entry · required
 
+age public keys (age1…) the copy is encrypted to; any one of their identities decrypts it.
+
 ### `server_binary`
 
 one of `"auto"`, `"manual"` · default `"auto"`
@@ -366,6 +432,8 @@ one of `"auto"`, `"manual"` · default `"auto"`
 ### `notify`
 
 object · optional
+
+Where deploy results go. With ntfy, failed nightly backups are reported there too.
 
 ### `notify.webhook`
 
@@ -389,9 +457,13 @@ Push notification via ntfy (https://ntfy.sh/&lt;topic> or your own server); with
 
 URL · required
 
+The topic URL messages are POSTed to, e.g. https://ntfy.sh/&lt;topic>.
+
 ### `notify.ntfy.email`
 
 string · optional
+
+Address ntfy also mails each message to. If ntfy refuses the mail, the push goes out without it.
 
 ### `notify.ntfy.token`
 
@@ -413,6 +485,8 @@ One server; the file name is the server's name.
 
 string matching `^[a-z0-9][a-z0-9-]*$` · required
 
+The server's name in commands, backups and the tailnet (its Tailscale hostname); fornax writes changes to servers/&lt;server>.yaml. Change it with `fornax server rename`.
+
 ### `former_names`
 
 list of strings matching `^[a-z0-9][a-z0-9-]*$` · default `[]`
@@ -423,25 +497,37 @@ Names the server had before (`fornax server rename`): backups made under them st
 
 string (a host name or IP address) · required
 
+What fornax connects to over SSH: an IP address or a host name (with access "tailscale" usually the tailnet name).
+
 ### `provider`
 
 object · optional
+
+Where the server comes from: decides what fornax can do through the provider's API (destroy, rename, snapshot, reinstall, reverse DNS).
 
 ### `provider.type`
 
 string · default `"manual"`
 
+"manual" (any server, no API), "hetzner-cloud", "digitalocean" or "netcup" (no API either: order and reinstall in its panel).
+
 ### `provider.id`
 
 string or number · optional
+
+The server's ID at the provider; the API commands (destroy, rename, snapshot, reinstall, reverse DNS) need it.
 
 ### `provider.credentials`
 
 string · optional
 
+Secret reference of the provider's API token for this server only; default: provider_credentials.&lt;type> in fornax.yaml.
+
 ### `arch`
 
 one of `"arm64"`, `"x86_64"` · optional
+
+"arm64" or "x86_64" (set by `fornax server create`). fornax compares it with the live server and stops on a mismatch.
 
 ### `public_ipv4`
 
@@ -453,6 +539,8 @@ Public addresses (for DNS); `host` may be a private or tailnet name.
 
 string · optional
 
+Public IPv6 address, for DNS records and reverse DNS.
+
 ### `modules`
 
 list, each one of `"base"`, `"access"`, `"security"`, `"web"`, `"php"`, `"data"` · default `["base", "access", "security", "web", "php", "data"]`
@@ -463,29 +551,55 @@ Server-level modules fornax manages. Adopted servers start with [].
 
 list of strings matching `^\d\.\d$` · default `["8.4"]`
 
+PHP versions installed side by side, each with its own FPM service, e.g. ["8.3", "8.4"]. Where the ondrej/php PPA does not serve the Ubuntu release, only the system's PHP is possible.
+
 ### `php_default`
 
 string · optional
+
+PHP version the `php` command points to and sites without their own `php` use; default: the last in `php`.
 
 ### `php_extensions`
 
 list of strings (letters, digits and . - _ only) · default `[]`
 
+Extra PHP extensions for every version in `php`, by package suffix (imagick installs php8.4-imagick), on top of fornax's standard set.
+
+### `php_ini`
+
+map of `<name>` to strings (a single value without ; or quotes) · default `{}`
+
+php.ini settings over fornax's defaults (memory_limit 512M, upload_max_filesize and post_max_size 64M, max_execution_time 60, OPcache on), for every PHP version — e.g. { max_execution_time: "0", "opcache.validate_timestamps": "0" }.
+
+### `retire`
+
+list of strings (an absolute path; no ..) · default `[]`
+
+Files fornax removes from the server (taken-over configuration that fornax's own replaces, e.g. a panel's /etc/nginx/conf.d/gzip.conf); kept in the apply's backup.
+
 ### `services`
 
 list, each one of `"mysql"`, `"postgres"`, `"redis"`, `"memcached"`, `"supervisor"`, `"crowdsec"`, `"fail2ban"` · default `["mysql", "postgres", "redis", "supervisor", "fail2ban"]`
+
+Services fornax installs and runs: mysql, postgres, redis (the server's own, also needed for sites' own Redis), memcached, supervisor (needed for site daemons), crowdsec and fail2ban (SSH jail).
 
 ### `tools`
 
 list, each one of `"composer"`, `"bun"`, `"node"` · default `["composer", "bun"]`
 
+Command-line tools the php module installs: composer and bun in /usr/local/bin, node (Node.js 22 from NodeSource). Preset node needs bun or node, depending on its start command.
+
 ### `timezone`
 
 string (a time zone such as Europe/Berlin) · default `"UTC"`
 
+System time zone (/etc/localtime and /etc/timezone), e.g. Europe/Berlin.
+
 ### `swap`
 
 string matching `^\d+[MG]$` · optional
+
+Size of a swap file (/swapfile) fornax creates and turns on, e.g. "2G". No swap file without it.
 
 ### `auto_reboot`
 
@@ -497,25 +611,41 @@ Unattended security upgrades reboot at this UTC time; false disables reboots.
 
 string · optional
 
+URL of an Ubuntu package mirror, written to /etc/apt/sources.list.d/ubuntu.sources in place of the default archive.
+
 ### `firewall`
 
 object · optional
+
+ufw: incoming traffic is denied except ports 80 and 443, SSH and what is listed here. Rules added by hand are removed on apply.
 
 ### `firewall.allow`
 
 list of objects · default `[]`
 
+Extra ufw allow rules: a port (from anywhere, or `from` one address), or everything coming `on` a network interface (e.g. tailscale0), optionally to one port. A port, an interface (on), or both.
+
 ### `firewall.allow[].port`
 
-number or string · required
+whole number or string (a port or range such as 8000:8010) · optional
+
+A port, or a range such as "6000:6010".
 
 ### `firewall.allow[].proto`
 
 one of `"tcp"`, `"udp"` · default `"tcp"`
 
+"tcp" or "udp".
+
 ### `firewall.allow[].from`
 
-string · optional
+string (an address or network) · optional
+
+Only from this address or network (e.g. 10.0.0.0/8); without it, from anywhere.
+
+### `firewall.allow[].on`
+
+string (a network interface such as tailscale0) · optional
 
 ### `firewall.ssh_from`
 
@@ -527,9 +657,13 @@ Who may reach port 22 in access mode "ssh".
 
 object · optional
 
+The server's shared Redis (127.0.0.1:6379).
+
 ### `redis.password`
 
 boolean · default `true`
+
+Require a password, generated on the server (/etc/fornax/secrets/redis) and written into new Laravel .env files. false: no password.
 
 ### `redis.source`
 
@@ -553,13 +687,19 @@ Overrides the fleet's ssh settings for this server (e.g. a non-root user with su
 
 string · optional
 
+User fornax logs in as on this server; any user but root runs commands through sudo.
+
 ### `ssh.port`
 
 whole number · optional
 
+SSH port of this server.
+
 ### `ssh.sudo_password`
 
 string · optional
+
+For a non-root user: secret reference of its sudo password (omit for passwordless sudo).
 
 ### `ssh.root_keys`
 
@@ -589,9 +729,13 @@ Push-to-deploy reaches each site through its own domain (https://&lt;site>/.well
 
 string (a lower-case host name) · optional
 
+Extra hostname for the deploy webhook, with its own vhost and certificate (older setups).
+
 ### `webhook.port`
 
 whole number · default `9300`
+
+Port on 127.0.0.1 the webhook listens on. No node app or proxy of a site may use it.
 
 ### `forge_detach`
 
@@ -602,6 +746,8 @@ Set by `fornax detach forge`: Forge's access and leftovers are removed on apply.
 ### `forge_detach.ufw_ssh_ips`
 
 list of strings · default `[]`
+
+Addresses whose ufw rules for port 22 (Forge's access) are removed on apply.
 
 ### `packages`
 
@@ -619,21 +765,31 @@ A file fornax manages verbatim: content inline or from a path relative to the fl
 
 string (starting with `/`) · required
 
+Absolute path of the file on the server.
+
 ### `files[].source`
 
 string · optional
+
+File whose content is written, relative to the fleet dir (or absolute).
 
 ### `files[].content`
 
 string · optional
 
+The file's content, inline.
+
 ### `files[].mode`
 
 string matching `^0?[0-7]{3,4}$` · default `"0644"`
 
+Octal file mode, e.g. "0600".
+
 ### `files[].owner`
 
 string · default `"root:root"`
+
+Owner of the file as user:group.
 
 ### `files[].handler`
 
@@ -651,6 +807,8 @@ The server's sites, by domain: see [Site entries](#site-entries).
 
 string · optional
 
+Free text for people; shown by `fornax explain`.
+
 ## Site entries
 
 Each key under `sites:` in a server file is a site's domain; its value is the site.
@@ -665,13 +823,19 @@ owner/name on GitHub or a git URL (never starting with "-": git would read an op
 
 string (a git branch name) · default `"main"`
 
+Git branch that is deployed; the webhook ignores pushes to other branches.
+
 ### `sites.<domain>.user`
 
 string matching `^[a-z_][a-z0-9_-]{0,31}$` · optional
 
+Linux user the site runs as (PHP-FPM pool, daemons, cron, deploys); its files live in /home/&lt;user>/&lt;domain>. Default: the domain's first label (shop.example.com: shop). Each site needs its own.
+
 ### `sites.<domain>.aliases`
 
 list of strings (a lower-case host name; not an IP address (&lt;ip with dashes>.sslip.io is a name for one, e.g. 192-0-2-10.sslip.io)) · default `[]`
+
+More names that serve the same app; in the site's vhost and certificate.
 
 ### `sites.<domain>.proxies`
 
@@ -683,29 +847,43 @@ Extra names that proxy to a local port instead of serving the app (e.g. a Reverb
 
 string (a lower-case host name; not an IP address (&lt;ip with dashes>.sslip.io is a name for one, e.g. 192-0-2-10.sslip.io)) · required
 
+The name, e.g. ws.example.com.
+
 ### `sites.<domain>.proxies[].port`
 
 whole number from 1 to 65535 · required
+
+Local port on 127.0.0.1 that nginx forwards to.
 
 ### `sites.<domain>.proxies[].websocket`
 
 boolean · default `true`
 
+Pass websocket upgrades and keep idle connections open for an hour; false for plain HTTP.
+
 ### `sites.<domain>.proxies[].cert`
 
 string · optional
+
+With tls.issuer "existing": path of this name's certificate on the server (otherwise the site's is used).
 
 ### `sites.<domain>.proxies[].key`
 
 string · optional
 
+With tls.issuer "existing": path of this name's private key on the server.
+
 ### `sites.<domain>.php`
 
 string · optional
 
+PHP version of the site, one of the server's `php`; default: the server's php_default.
+
 ### `sites.<domain>.preset`
 
 one of `"laravel"`, `"php"`, `"static"`, `"node"` · default `"laravel"`
+
+What kind of app: "laravel" (artisan steps on deploy, .env and storage set up), "php" (PHP-FPM without Laravel steps), "static" (files only, no PHP) or "node" (its own server, see node). Decides the default build, web_dir, shared paths and Redis.
 
 ### `sites.<domain>.node`
 
@@ -717,9 +895,13 @@ preset node: the app's own server, behind nginx. `start` runs in the release as 
 
 string (a plain command: letters, digits, spaces and . / = : @ + , - _ only; a command) · required
 
+Command that starts the app, e.g. "bun run start"; plain characters only (it goes into a systemd unit).
+
 ### `sites.<domain>.node.port`
 
 whole number from 1024 to 65534 · optional
+
+The first of the app's two ports (it takes port+1 as well); default: derived from the domain.
 
 ### `sites.<domain>.web_dir`
 
@@ -731,6 +913,8 @@ Document root relative to the release.
 
 list of strings (letters, digits and . / ~ @ + - _ only; a path inside the site directory (relative, no ..)) · optional
 
+Paths kept in the site directory across releases and linked into each one, e.g. uploads. Default: ["storage"] for preset laravel, none otherwise; .env and auth.json are always linked.
+
 ### `sites.<domain>.composer_auth`
 
 string · optional
@@ -741,21 +925,31 @@ Secret reference of composer's auth.json (private package repos, e.g. Flux Pro, 
 
 object · optional
 
+A database for the site on this server: fornax creates it and its user with a generated password (preset laravel: written into a new .env).
+
 ### `sites.<domain>.db.engine`
 
 one of `"mysql"`, `"postgres"` · required
+
+"mysql" or "postgres"; the server needs the matching service.
 
 ### `sites.<domain>.db.name`
 
 string matching `^[a-z_][a-z0-9_]*$` · optional
 
+Database name; default: the site user with - turned into _.
+
 ### `sites.<domain>.db.user`
 
 string matching `^[a-z_][a-z0-9_]*$` · optional
 
+Database user (role); default: the site user with - turned into _.
+
 ### `sites.<domain>.db.extensions`
 
 list of strings (an extension name) · default `[]`
+
+PostgreSQL extensions created in the database, e.g. vector (installs pgvector).
 
 ### `sites.<domain>.db.manage`
 
@@ -773,6 +967,8 @@ Redis for the site. "own" (default for preset laravel; adopted sites: "shared"; 
 
 one of `"own"`, `"shared"`, `"none"` · optional
 
+"own", "shared" or "none" (see redis); the default depends on the preset. Without redis in the server's services it is always "none".
+
 ### `sites.<domain>.redis.maxmemory`
 
 string (a size such as 256mb) · default `"256mb"`
@@ -783,25 +979,37 @@ Memory limit of an own instance; keys with an expiry (cache, sessions) give way 
 
 boolean · default `false`
 
+Run Laravel's scheduler: a cron line runs `php artisan schedule:run` every minute as the site user in the current release.
+
 ### `sites.<domain>.daemons`
 
 list of objects · default `[]`
+
+Long-running processes (queue workers, Horizon, Reverb …) under supervisor, as the site user in the current release; restarted after every deploy. Needs supervisor in the server's services.
 
 ### `sites.<domain>.daemons[].name`
 
 string matching `^[a-z0-9-]+$` · optional
 
+Short name in the program name (fornax-&lt;site>-&lt;name>) and its log file; default: from the command (horizon, queue, reverb, ssr, octane, pulse) or d1, d2 …
+
 ### `sites.<domain>.daemons[].cmd`
 
 string (a single line) · required
+
+The command supervisor runs, e.g. "php artisan queue:work --tries=3".
 
 ### `sites.<domain>.daemons[].processes`
 
 whole number, at least 1 · default `1`
 
+How many copies supervisor runs (numprocs).
+
 ### `sites.<domain>.daemons[].stopwait`
 
 whole number, at least 1 · default `60`
+
+Seconds supervisor waits after SIGTERM before it kills the process (stopwaitsecs): time for a running job to finish.
 
 ### `sites.<domain>.daemons[].directory`
 
@@ -819,33 +1027,49 @@ Supervisor program name, when it is not fornax's own (adopted Forge daemons: dae
 
 list of objects · default `[]`
 
+Cron jobs of the site, run as the site user in the current release; output goes to ~/.fornax/cron.log.
+
 ### `sites.<domain>.cron[].at`
 
 string (five cron fields or @daily etc.) · required
+
+When: five cron fields ("0 3 * * *") or @daily, @hourly etc.
 
 ### `sites.<domain>.cron[].cmd`
 
 string (a single line) · required
 
+The command, run with bash in the current release.
+
 ### `sites.<domain>.tls`
 
 object · optional
+
+The site's certificate, covering the domain, aliases, www, redirects and proxies.
 
 ### `sites.<domain>.tls.issuer`
 
 one of `"letsencrypt"`, `"selfsigned"`, `"existing"`, `"none"` · optional
 
+"letsencrypt", "selfsigned", "existing" (a certificate fornax does not issue: tls.cert and tls.key) or "none" (HTTP only); default: the fleet's tls.issuer.
+
 ### `sites.<domain>.tls.cert`
 
 string · optional
+
+With issuer "existing": path of the certificate (full chain) on the server.
 
 ### `sites.<domain>.tls.key`
 
 string · optional
 
+With issuer "existing": path of the private key on the server.
+
 ### `sites.<domain>.www_redirect`
 
 boolean · default `false`
+
+Also answer www.&lt;domain> and send it on to &lt;domain> (301); www goes into the certificate.
 
 ### `sites.<domain>.redirects`
 
@@ -863,13 +1087,19 @@ Path a new release must answer (2xx/3xx) before and after it goes live; preset n
 
 object · optional
 
+How fornax deploys the site from `repo` (`fornax deploy` and on push).
+
 ### `sites.<domain>.deploy.enabled`
 
 boolean · default `true`
 
+false: fornax does not deploy the site (no deploy key, webhook or deploy config on the server). Sites imported from Forge start with false.
+
 ### `sites.<domain>.deploy.script`
 
 string (letters, digits and . / ~ @ + - _ only; a path inside the site directory (relative, no ..)) · default `".fornax/deploy.sh"`
+
+Build script in the repo, run with bash in the checkout. When the repo has it, it replaces deploy.commands and the preset's own build; it gets FORNAX_SITE, FORNAX_SITE_PATH, FORNAX_RELEASE_PATH, FORNAX_PHP and FORNAX_COMPOSER.
 
 ### `sites.<domain>.deploy.mode`
 
@@ -899,25 +1129,37 @@ Turn off generated files when they are adopted verbatim via `files`.
 
 boolean · default `true`
 
+The site's nginx vhost.
+
 ### `sites.<domain>.generate.pool`
 
 boolean · default `true`
+
+The site's PHP-FPM pool.
 
 ### `sites.<domain>.generate.daemons`
 
 boolean · default `true`
 
+The supervisor programs of `daemons`.
+
 ### `sites.<domain>.generate.cron`
 
 boolean · default `true`
+
+The /etc/cron.d file for `schedule` and `cron`.
 
 ### `sites.<domain>.generate.logrotate`
 
 boolean · default `true`
 
+Log rotation for the site's logs (/etc/logrotate.d).
+
 ### `sites.<domain>.nginx`
 
 object · optional
+
+Additions to the site's generated vhost.
 
 ### `sites.<domain>.nginx.server`
 
@@ -935,6 +1177,8 @@ Snippet files included at http level, before the server block.
 
 string (a size such as 64M) · optional
 
+Largest request body nginx accepts for the site, e.g. 256M (fornax's nginx.conf allows 64m).
+
 ### `sites.<domain>.files`
 
 list of objects · default `[]`
@@ -945,21 +1189,31 @@ A file fornax manages verbatim: content inline or from a path relative to the fl
 
 string (starting with `/`) · required
 
+Absolute path of the file on the server.
+
 ### `sites.<domain>.files[].source`
 
 string · optional
+
+File whose content is written, relative to the fleet dir (or absolute).
 
 ### `sites.<domain>.files[].content`
 
 string · optional
 
+The file's content, inline.
+
 ### `sites.<domain>.files[].mode`
 
 string matching `^0?[0-7]{3,4}$` · default `"0644"`
 
+Octal file mode, e.g. "0600".
+
 ### `sites.<domain>.files[].owner`
 
 string · default `"root:root"`
+
+Owner of the file as user:group.
 
 ### `sites.<domain>.files[].handler`
 
@@ -983,25 +1237,37 @@ PHP-FPM pool sizing.
 
 whole number, at least 1 · default `10`
 
+Most PHP workers at once (pm.max_children): the site's concurrent PHP requests.
+
 ### `sites.<domain>.pool.start_servers`
 
 whole number, at least 1 · default `2`
+
+Workers started with the pool (pm.start_servers).
 
 ### `sites.<domain>.pool.min_spare_servers`
 
 whole number, at least 1 · default `1`
 
+Fewest idle workers kept (pm.min_spare_servers).
+
 ### `sites.<domain>.pool.max_spare_servers`
 
 whole number, at least 1 · default `3`
+
+Most idle workers kept (pm.max_spare_servers).
 
 ### `sites.<domain>.pool.max_requests`
 
 whole number, at least 0 · default `1000`
 
+Requests a worker serves before it is replaced (pm.max_requests); 0: never.
+
 ### `sites.<domain>.pool.request_terminate_timeout`
 
 whole number, at least 0 · default `120`
+
+Seconds a request may run before PHP-FPM ends it; 0: no limit.
 
 ### `sites.<domain>.origin`
 
@@ -1013,29 +1279,43 @@ Where an adopted site came from (filled by `fornax import forge`, used by `forna
 
 `"forge"` · required
 
+The tool the site was taken over from: "forge".
+
 ### `sites.<domain>.origin.site_id`
 
 string · required
+
+The site's ID in Forge (its logrotate file forge-&lt;id> is retired on convert).
 
 ### `sites.<domain>.origin.domain_ids`
 
 list of strings · default `[]`
 
+Forge's IDs of the site's domains: their renewal cron files go when `fornax site convert --only tls` switches the certificate.
+
 ### `sites.<domain>.origin.zero_downtime`
 
 boolean · default `true`
+
+Whether Forge deployed with releases; false makes `fornax site convert --only deploy` keep deploying in place.
 
 ### `sites.<domain>.origin.cron`
 
 list of objects · default `[]`
 
+The site's scheduled jobs at Forge; `fornax site convert --only cron` moves them into schedule and cron.
+
 ### `sites.<domain>.origin.cron[].at`
 
 string (a single line) · required
 
+The schedule as Forge had it.
+
 ### `sites.<domain>.origin.cron[].cmd`
 
 string (a single line) · required
+
+The command as Forge had it.
 
 ### `sites.<domain>.backup`
 
@@ -1047,6 +1327,8 @@ Nightly backup of this site: database dump, shared paths and .env (plus extra pa
 
 boolean · default `true`
 
+false: leave the site out of the nightly backup.
+
 ### `sites.<domain>.backup.paths`
 
 list of strings · default `[]`
@@ -1057,6 +1339,8 @@ Extra absolute paths or paths relative to the site root.
 
 string · optional
 
+Free text for people; shown by `fornax explain` (`fornax import forge` writes what it found).
+
 ### `sites.<domain>.adopted`
 
 boolean · default `false`
@@ -1066,6 +1350,8 @@ Taken over from another tool (e.g. Forge): fornax manages only the listed `files
 ### `sites.<domain>.state`
 
 one of `"present"`, `"absent"` · default `"present"`
+
+"absent" removes the site from the server: vhost, pool, cron, daemons, its files and its own Redis. The user, home directory and database stay unless purge is set.
 
 ### `sites.<domain>.purge`
 

@@ -10,7 +10,7 @@ import { MODULES, type Server } from "../core/schema.ts";
 import { runnerFor } from "../core/ssh.ts";
 import { remoteBinary } from "../core/binary.ts";
 import { DISTROS, SUPPORTED_UBUNTU, type ModuleCtx } from "./common.ts";
-import { SERVER_MODULES, serverFiles } from "./server.ts";
+import { SERVER_MODULES, serverFiles, serverRetire } from "./server.ts";
 import { siteResources, deployResources } from "./site.ts";
 import { detachResources } from "../forge/detach.ts";
 import { LEGACY_GONE, legacyEarly, legacyLate } from "./legacy.ts";
@@ -101,6 +101,8 @@ export function desired(fleet: Fleet, server: Server, facts: ModuleCtx["facts"],
   // /etc in git first: everything after it is part of the server's history (full plans and bootstrap)
   const withHistory = !scope?.sites?.length && (!scope?.modules?.length || scope.modules.includes("base"));
   const r: Resource[] = [pendingHandlers(), ...legacyEarly(ctx), ...(withHistory ? [...historyResources(ctx), ...rootAccessResources(ctx)] : [])];
+  // taken-over files fornax's own replace go first: removed in the same apply, before the reload that checks both
+  if (!scope?.sites?.length) r.push(...serverRetire(ctx));
   for (const m of MODULES) {
     if (server.modules.includes(m) && wantModules.includes(m)) r.push(...SERVER_MODULES[m](ctx));
   }

@@ -70,7 +70,11 @@ export function ufwRules(ctx: ModuleCtx): string[] {
   // decision (acls), this rule only holds with --netfilter-mode=nodivert.
   if (ctx.fleet.config.access === "tailscale") rules.push("allow in on tailscale0 to any port 22 proto tcp");
   else for (const from of s.firewall.ssh_from) rules.push(from === "any" ? `allow ${ctx.fleet.config.ssh.port}/tcp` : `allow from ${from} to any port ${ctx.fleet.config.ssh.port} proto tcp`);
-  for (const a of s.firewall.allow) rules.push(a.from ? `allow from ${a.from} to any port ${a.port} proto ${a.proto}` : `allow ${a.port}/${a.proto}`);
+  for (const a of s.firewall.allow) {
+    // written as `ufw show added` lists them, so the probe compares like with like
+    if (a.on) rules.push(`allow in on ${a.on}${a.from ? ` from ${a.from}` : ""}${a.port !== undefined ? ` to any port ${a.port} proto ${a.proto}` : ""}`);
+    else rules.push(a.from ? `allow from ${a.from} to any port ${a.port} proto ${a.proto}` : `allow ${a.port}/${a.proto}`);
+  }
   return rules;
 }
 
@@ -304,18 +308,25 @@ export function web(ctx: ModuleCtx): Resource[] {
 
 const PHP_EXTENSIONS = ["fpm", "cli", "common", "mbstring", "xml", "curl", "zip", "bcmath", "intl", "gd", "mysql", "pgsql", "sqlite3", "redis", "readline", "igbinary", "msgpack"];
 
-export const phpIni = (v: string) => `; ${HEADER}\nmemory_limit = 512M
-upload_max_filesize = 64M
-post_max_size = 64M
-max_execution_time = 60
-expose_php = Off
-opcache.enable = 1
-opcache.memory_consumption = 256
-opcache.max_accelerated_files = 20000
-opcache.validate_timestamps = 1
-opcache.revalidate_freq = 2
-; PHP ${v}
-`;
+/** fornax's php.ini settings; a server's php_ini overrides and extends them. */
+export const PHP_INI_DEFAULTS: Record<string, string> = {
+  memory_limit: "512M",
+  upload_max_filesize: "64M",
+  post_max_size: "64M",
+  max_execution_time: "60",
+  expose_php: "Off",
+  "opcache.enable": "1",
+  "opcache.memory_consumption": "256",
+  "opcache.max_accelerated_files": "20000",
+  "opcache.validate_timestamps": "1",
+  "opcache.revalidate_freq": "2",
+};
+
+export const phpIni = (v: string, overrides: Record<string, string> = {}, sapi: "fpm" | "cli" = "fpm") => {
+  // the CLI runs queues and migrations: no time limit there, whatever the web requests get
+  const ini = { ...PHP_INI_DEFAULTS, ...overrides, ...(sapi === "cli" ? { max_execution_time: "0" } : {}) };
+  return `; ${HEADER}\n${Object.entries(ini).map(([k, val]) => `${k} = ${val}`).join("\n")}\n; PHP ${v}\n`;
+};
 
 export function php(ctx: ModuleCtx): Resource[] {
   const s = ctx.server;
@@ -330,8 +341,8 @@ export function php(ctx: ModuleCtx): Resource[] {
     const versionExts = Number(v) < 8.5 ? [...exts, "opcache"] : exts;
     r.push(
       packages(`php${v}`, versionExts.map((e) => `php${v}-${e}`), o),
-      file(`/etc/php/${v}/fpm/conf.d/90-fornax.ini`, phpIni(v), { ...o, handler: `php${v}-fpm` }),
-      file(`/etc/php/${v}/cli/conf.d/90-fornax.ini`, phpIni(v).replace("max_execution_time = 60", "max_execution_time = 0"), { ...o, handler: "none" }),
+      file(`/etc/php/${v}/fpm/conf.d/90-fornax.ini`, phpIni(v, s.php_ini), { ...o, handler: `php${v}-fpm` }),
+      file(`/etc/php/${v}/cli/conf.d/90-fornax.ini`, phpIni(v, s.php_ini, "cli"), { ...o, handler: "none" }),
       service(`php${v}-fpm`, o),
     );
   }
@@ -413,6 +424,11 @@ printf 'requirepass %s\\n' "$(cat ${SECRETS}/redis)" > /etc/redis/fornax-auth.co
   if (s.services.includes("memcached")) r.push(packages("memcached", ["memcached"], o), service("memcached", o));
   if (s.services.includes("supervisor")) r.push(packages("supervisor", ["supervisor"], o), service("supervisor", o));
   return r;
+}
+
+/** server.retire: taken-over files that fornax's own configuration replaces (backed up by the apply). */
+export function serverRetire(ctx: ModuleCtx): Resource[] {
+  return ctx.server.retire.map((path) => absent(path, { owner: "files", summary: `retire ${path}` }));
 }
 
 export function serverFiles(ctx: ModuleCtx): Resource[] {

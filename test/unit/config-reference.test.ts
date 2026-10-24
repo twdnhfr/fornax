@@ -12,7 +12,7 @@ describe("config reference", () => {
   test("every doc comment in schema.ts belongs to a key of the reference", () => {
     expect(ref.unmatched).toEqual([]);
     // and a comment the reference cannot place is reported
-    const source = readFileSync(SCHEMA_FILE, "utf8").replace("  state: z.enum", "  /** Not in the schema. */\n  ghost: z.string(),\n  state: z.enum");
+    const source = readFileSync(SCHEMA_FILE, "utf8").replace("  purge: z.boolean().default(false),", "  purge: z.boolean().default(false),\n  /** Not in the schema. */\n  ghost: z.string(),");
     expect(renderReference(source).unmatched).toEqual(["SiteSchema.ghost"]);
   });
 
@@ -21,7 +21,7 @@ describe("config reference", () => {
     expect(ref.markdown).toContain("### `ssh.root_keys`\n\nlist of strings (an OpenSSH public key line) · optional\n\nExactly these public keys");
     expect(ref.markdown).toContain("### `tailscale.allow[].ports`\n\nlist of whole numbers from 1 to 65535, at least 1 entry · required");
     expect(ref.markdown).toContain("relative to the fleet dir. A file needs exactly one of source or content.");
-    expect(ref.undocumented).toContain("fleet");
+    expect(ref.undocumented).toContain("firewall.allow[].on");
   });
 
   test("comments are tied to the key below them, by key path", () => {

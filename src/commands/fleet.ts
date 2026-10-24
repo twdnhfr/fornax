@@ -125,7 +125,7 @@ defineCommand({
       }
     }
     const conventions = [
-      "Run fornax inside a fleet repo (the directory with fornax.yaml), pass --fleet <dir>, or set $FORNAX_FLEET; elsewhere ~/.config/fornax/fleet is used when it exists.",
+      "Run fornax inside a fleet repo (the directory with fornax.yaml), pass --fleet <dir>, or set $FORNAX_FLEET. Read commands fall back to ~/.config/fornax/fleet when it exists; write and destroy commands never do (error implicit_fleet) and name the fleet they change on stderr.",
       "First setup of a server: `fornax server add` → `fornax server bootstrap` → `fornax site add` → `fornax server provision` (plans and applies everything in one go) → `fornax deploy <site>`. After that, every change: edit (or `site add`) → `fornax plan` → `fornax apply`.",
       "Tiers: read = safe to run any time; write = changes servers/APIs/config, ask the human first; destroy = also needs --confirm=<name>.",
       "Change servers in two steps: `fornax plan <server>` (read, prints a plan id) then `fornax apply <plan-id>` (write). Never edit managed files on a server by hand — edit the fleet repo.",

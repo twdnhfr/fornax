@@ -668,7 +668,9 @@ function viewNewSite(preselect) {
       then: async (_run, ev) => {
         await loadFleet();
         renderSidebar();
-        startRun({ target: "new", command: "plan", args: [ev.data.server], options: { site: [ev.data.added] } });
+        // the server's first site comes with the server's own setup: plan all of it (what provision would apply)
+        const whole = String(ev.data.next ?? "").startsWith("fornax server provision");
+        startRun({ target: "new", command: "plan", args: [ev.data.server], options: whole ? {} : { site: [ev.data.added] } });
       },
     });
   };

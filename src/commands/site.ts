@@ -1,6 +1,6 @@
 import { defineCommand, requireConfirm } from "../core/command.ts";
 import { fail } from "../core/errors.ts";
-import { assertPolicies, editServerFile, findSite, getServer, isProtected, loadFleet, repoOwner } from "../core/fleet.ts";
+import { assertPolicies, editServerFile, findSite, getServer, isProtected, loadFleet, repoOwner, sites } from "../core/fleet.ts";
 import { previewName } from "../core/names.ts";
 import { PRESETS } from "../core/schema.ts";
 import type { Fleet } from "../core/fleet.ts";
@@ -29,13 +29,14 @@ defineCommand({
     preview: { type: "boolean", help: "a made-up name under preview_domain (e.g. quiet-harbor.example.com): the site's domain without one, else an extra alias" },
     repo: { type: "string", help: "git repo: owner/name (GitHub), git@…, https://… or file:///…" },
     branch: { type: "string", help: "branch to deploy", default: "main" },
-    preset: { type: "string", help: `deploy preset: ${PRESETS.join(", ")}`, default: "laravel" },
+    preset: { type: "string", help: "laravel | php (both serve public/ of the repo) | static (serves the repo root) | node (proxies to the app's own server)", default: "laravel" },
+    "web-dir": { type: "string", help: "the directory nginx serves, inside the repo (default: public for laravel/php, the root for static)" },
     start: { type: "string", help: "--preset node: the command that starts the app, e.g. 'bun run start'" },
     php: { type: "string", help: "PHP version (default: the server's default)" },
     user: { type: "string", help: "Linux user (default: first label of the domain)" },
     db: { type: "string", help: "create a database: mysql | postgres" },
     alias: { type: "list", help: "additional domains" },
-    tls: { type: "string", help: "letsencrypt | selfsigned | none (default: fleet setting)" },
+    tls: { type: "string", help: "letsencrypt | selfsigned | none (default: tls.issuer in fornax.yaml — letsencrypt in a new fleet; selfsigned for names without public DNS)" },
     www: { type: "boolean", help: "redirect www.<domain> to <domain>" },
     daemon: { type: "list", help: "daemon command(s), e.g. 'php artisan horizon'" },
     schedule: { type: "boolean", help: "run the Laravel scheduler every minute" },
@@ -82,6 +83,7 @@ defineCommand({
     if ((input.alias as string[] | undefined)?.length) site.aliases = input.alias;
     if (input.tls) site.tls = { issuer: String(input.tls) };
     if (input.www) site.www_redirect = true;
+    if (input.webDir !== undefined) site.web_dir = String(input.webDir);
     if (input.schedule) site.schedule = true;
     if ((input.daemon as string[] | undefined)?.length) site.daemons = (input.daemon as string[]).map((cmd) => ({ cmd }));
     const path = editServerFile(fleet, server.server, (doc) => doc.setIn(["sites", domain], doc.createNode(site)));
@@ -89,9 +91,12 @@ defineCommand({
     const after = loadFleet(ctx);
     assertPolicies(after, getServer(after, server.server));
     const { site: resolved } = findSite(after, domain);
+    // the first site on a server comes with the server's own setup (nginx, PHP …); later ones are a plan
+    const first = sites(after, getServer(after, server.server)).filter((x) => x.spec.state === "present").length === 1;
+    const next = first ? `fornax server provision ${server.server}` : `fornax plan ${server.server} --site ${domain}`;
     return {
-      data: { added: domain, server: server.server, file: path, user: resolved.user, php: resolved.php, root: resolved.root, next: `fornax plan ${server.server} --site ${domain}` },
-      human: `added ${domain} to ${server.server} (${path})\nuser ${resolved.user}, php ${resolved.php}, root ${resolved.root}\nnext: fornax plan ${server.server} --site ${domain}, then fornax apply <plan-id>  (on a server that is not provisioned yet: fornax server provision ${server.server})`,
+      data: { added: domain, server: server.server, file: path, user: resolved.user, php: resolved.php, root: resolved.root, serves: resolved.webRoot, tls: resolved.tlsIssuer, next },
+      human: `added ${domain} to ${server.server} (${path})\nuser ${resolved.user}, php ${resolved.php}, serves ${resolved.webRoot}, tls ${resolved.tlsIssuer}\nnext: ${next}${first ? "   (the server's first site: installs and configures everything, then the site)" : ", then fornax apply <plan-id>"}`,
     };
   },
 });

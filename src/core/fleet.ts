@@ -139,8 +139,22 @@ export function defaultFleetDir(): string | undefined {
   return dir && fleetFile(dir) ? dir : undefined;
 }
 
-export function loadFleet(opts: { cwd: string; fleetDir?: string }): Fleet {
-  const dir = opts.fleetDir ? resolve(opts.cwd, opts.fleetDir) : (findFleetDir(opts.cwd) ?? defaultFleetDir());
+const announced = new Set<string>();
+
+export function loadFleet(opts: { cwd: string; fleetDir?: string; tier?: "read" | "write" | "destroy" }): Fleet {
+  const found = opts.fleetDir ? resolve(opts.cwd, opts.fleetDir) : findFleetDir(opts.cwd);
+  const dir = found ?? defaultFleetDir();
+  // reading from anywhere is a convenience; changing things in a fleet nobody pointed at is how a
+  // script or an agent that took a wrong turn edits the real one — writes need a fleet named on purpose
+  const writes = opts.tier === "write" || opts.tier === "destroy";
+  if (writes && !found && dir && !process.env.FORNAX_FLEET) {
+    fail(
+      "implicit_fleet",
+      `this directory is no fleet repo, and write commands do not fall back to ${dir} on their own`,
+      "run it inside the fleet repo, or name the fleet: --fleet <dir> or $FORNAX_FLEET",
+      `cd ${dir}`,
+    );
+  }
   const file = dir ? fleetFile(dir) : undefined;
   if (!dir || !file) {
     fail(
@@ -171,6 +185,10 @@ export function loadFleet(opts: { cwd: string; fleetDir?: string }): Fleet {
   }
   const fleet = { dir: dir!, config, servers, files };
   for (const server of servers.values()) validateServer(fleet, server);
+  if (writes && !announced.has(dir!)) {
+    announced.add(dir!);
+    notice(`fleet "${config.fleet}" (${dir})`);
+  }
   return fleet;
 }
 

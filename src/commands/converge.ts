@@ -168,7 +168,7 @@ echo "installed=$((before - after))"
   return { installed: Number(out.stdout.match(/installed=(-?\d+)/)?.[1] ?? 0), reboot: /reboot=yes/.test(out.stdout) };
 }
 
-function oneShot(name: string, summary: string, modules: (s: Server) => Scope, extra: string | ((fleet: Fleet, s: Server) => string) = "", updates = false) {
+function oneShot(name: string, summary: string, modules: (s: Server) => Scope, extra: string | ((fleet: Fleet, s: Server) => string) = "", updates = false, note?: (fleet: Fleet, s: Server) => string) {
   defineCommand({
     name,
     summary,
@@ -182,7 +182,7 @@ function oneShot(name: string, summary: string, modules: (s: Server) => Scope, e
       const scope = modules(server);
       if (input.dryRun) {
         const { plan } = await buildPlan(fleet, server, scope, ctx);
-        return { data: planData(plan), human: renderChanges(plan) };
+        return { data: planData(plan), human: renderChanges(plan) + (note ? note(fleet, server) : "") };
       }
       const r = await converge(fleet, server, scope, input, ctx);
       // first contact: the security updates the provider's image lacks, before anything goes live (no reboot here: the server may already be serving)
@@ -190,7 +190,7 @@ function oneShot(name: string, summary: string, modules: (s: Server) => Scope, e
       const updLine = upd ? `\nsecurity updates: ${upd.installed} installed${upd.reboot ? " — a reboot is needed (unattended-upgrades reboots at auto_reboot, or reboot now)" : ""}` : "";
       return {
         data: { ...r, ...(upd ? { security_updates: upd } : {}) },
-        human: `${name.split(" ")[1]} done: ${r.applied} changes in ${r.rounds} round(s) on ${server.server}${r.in_sync ? ", now in sync" : `, ${r.remaining.length} still differ — fornax plan ${server.server}`}${updLine}${r.logs.length ? `\nlogs on server: ${r.logs.join(", ")}` : ""}${typeof extra === "function" ? extra(fleet, server) : extra}`,
+        human: `${name.split(" ")[1]} done: ${r.applied} changes in ${r.rounds} round(s) on ${server.server}${r.in_sync ? ", now in sync" : `, ${r.remaining.length} still differ — fornax plan ${server.server}`}${updLine}${r.logs.length ? `\nlogs on server: ${r.logs.join(", ")}` : ""}${note ? note(fleet, server) : ""}${typeof extra === "function" ? extra(fleet, server) : extra}`,
         exitCode: r.in_sync ? 0 : 1,
       };
     },
@@ -199,7 +199,7 @@ function oneShot(name: string, summary: string, modules: (s: Server) => Scope, e
 
 oneShot(
   "server bootstrap",
-  "first contact with a fresh server: base packages, admin user, SSH hardening, firewall, then the pending security updates",
+  "first contact with a fresh server: base packages, admin user, SSH hardening (keys only — you keep logging in as before), firewall, then the pending security updates",
   (s) => {
     const modules = s.modules.filter((m) => m === "base" || m === "access");
     if (!modules.length) fail("nothing_to_bootstrap", `${s.server} manages neither base nor access (modules: [${s.modules.join(", ")}])`, "adopted servers skip bootstrap", `fornax plan ${s.server}`);
@@ -207,6 +207,12 @@ oneShot(
   },
   "\nnext: fornax server provision <server>",
   true,
+  // the step where people fear to lock themselves out: say what logging in looks like afterwards
+  (fleet, s) => {
+    const user = s.ssh?.user ?? fleet.config.ssh.user;
+    const from = s.firewall?.ssh_from ?? [];
+    return `\nlogin afterwards: as before — ${user} with the same key (sshd: passwords off, PermitRootLogin prohibit-password); the firewall keeps SSH (port ${s.ssh?.port ?? fleet.config.ssh.port}) open${fleet.config.access === "tailscale" ? " on the tailnet" : from.length ? ` from ${from.join(", ")}` : ""}`;
+  },
 );
 
 oneShot("server provision", "install and configure everything the config describes (all modules and sites)", () => ({ modules: [], sites: [] }), (fleet, server) => {

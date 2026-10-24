@@ -224,7 +224,9 @@ export function vhostConf(s: ResolvedSite, hookPort?: number): string {
     '    add_header X-Frame-Options "SAMEORIGIN" always;',
     '    add_header X-Content-Type-Options "nosniff" always;',
     "",
-    ...snippetIncludes(s, s.spec.nginx.server, "").map((l) => `    ${l}`),
+    // the site's own server snippets (basic auth, IP gates) guard the public names only: the
+    // pre-activation check reaches the next release locally and must see the app, not a 401/403
+    ...(logs ? snippetIncludes(s, s.spec.nginx.server, "").map((l) => `    ${l}`) : []),
     ...(logs ? hook : []),
     ...(node
       ? nodeLocation(node.upstream.name)

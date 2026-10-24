@@ -100,7 +100,8 @@ describe("fornax ui: commands", () => {
     const ev = await events(await post({ command: "site add", args: ["t-1", "shop.example.com"], options: { repo: "acme/shop", db: "postgres", schedule: true, daemon: ["php artisan horizon"] } }));
     const result = ev.find((e) => e.t === "result") as Extract<RunEvent, { t: "result" }>;
     expect(result.exitCode).toBe(0);
-    expect(result.human).toContain("next: fornax plan t-1 --site shop.example.com");
+    // the server's first site: the whole server is the next step
+    expect(result.human).toContain("next: fornax server provision t-1");
     expect(readFileSync(join(dir, "servers", "t-1.yaml"), "utf8")).toContain("shop.example.com");
     const fleet = (await (await get("/api/fleet")).json()) as { sites: Array<{ site: string }> };
     expect(fleet.sites.map((s) => s.site)).toEqual(["shop.example.com"]);

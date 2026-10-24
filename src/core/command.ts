@@ -30,6 +30,8 @@ export interface Context {
   verbose: boolean;
   cwd: string;
   fleetDir?: string;
+  /** Tier of the running command: write and destroy commands need a fleet named on purpose (loadFleet). */
+  tier?: Tier;
   /** Progress output. Goes to stderr so stdout stays parseable. */
   log(line: string): void;
 }

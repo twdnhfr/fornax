@@ -57,6 +57,12 @@ describe("templates", () => {
     expect(v.split("location = /.well-known/fornax-hook").length).toBe(2);
     expect(vhostConf(shop)).not.toContain("fornax-hook");
   });
+  test("site snippets (basic auth, IP gates) guard the public names, not the local pre-activation check", () => {
+    const v = vhostConf(shop);
+    const [publicPart, preview] = v.split(/server \{\n    listen unix:/);
+    expect(publicPart).toContain("include /etc/nginx/fornax/sites/shop.example.com/cache-assets.conf;");
+    expect(preview).not.toContain("/etc/nginx/fornax/sites/shop.example.com/");
+  });
   test("static vhost has no PHP", () => {
     const v = vhostConf(docs);
     expect(v).not.toContain("fastcgi_pass");

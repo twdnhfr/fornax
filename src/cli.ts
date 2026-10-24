@@ -122,6 +122,7 @@ export async function main(rawArgv: string[]): Promise<number> {
       verbose: Boolean(input.verbose),
       cwd: process.cwd(),
       fleetDir: input.fleet as string | undefined,
+      tier: found.def.tier,
       log: (line) => process.stderr.write(line + "\n"),
     };
     const result = await found!.def.run(input, ctx);

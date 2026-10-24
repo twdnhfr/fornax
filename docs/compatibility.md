@@ -68,6 +68,7 @@ Without `--json` it goes to stderr as `error [<code>]: <message>`, followed by `
 | `no_terminal` | `fornax shell` needs a terminal |
 | `not_in_ui` | `fornax ui` was asked for a command or option the dashboard does not offer (destroy-tier commands, `apply --confirm`, `shell`, `run` …) |
 | `port_in_use`, `invalid_request` | `fornax ui` cannot listen on the given port; a dashboard request was not JSON |
+| `implicit_fleet` | a write or destroy command outside any fleet repo would only have found `~/.config/fornax/fleet` by falling back to it — name the fleet (`--fleet`, `$FORNAX_FLEET`) or run it inside |
 | `secret_unavailable`, `invalid_secret_ref` | a secret reference cannot be read, or is not one |
 | `onepassword_failed`, `onepassword_busy` | the 1Password CLI failed, or another fornax has held it for minutes |
 | `secrets_sync_failed` | the apply happened; copying its secrets to 1Password did not |

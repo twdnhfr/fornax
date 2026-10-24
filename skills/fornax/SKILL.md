@@ -45,7 +45,7 @@ fornax server status <server>       # raw facts: services, disk, updates, open p
 fornax history <server> [--path ufw] # who changed /etc and when: fornax runs, packages, or outside fornax (--show <commit> for the diff)
 fornax site alias <site> --preview   # a made-up name under preview_domain (also --add/--remove names)
 fornax server rename <server> [new]  # new name everywhere (provider, hostname, tailnet, fleet, 1Password, backups); old backups stay restorable — commit servers/ afterwards
-fornax logs <site> [nginx|access|laravel|daemon|deploy|php] --lines 100 --grep '…'
+fornax logs <site> [nginx|access|laravel|daemon|deploy|php|app] --lines 100 --grep '…'
 fornax fleet copies                 # encrypted copies of the fleet repo on the servers (apply stores them; fleet push now)
 fornax run <site> -- php artisan …   # one command as the site's user in its dir, its PHP version (write tier: ask before anything that changes data); exits with its code
 fornax shell <site>                 # interactive shell as the site's user — for the user in a terminal, not for agents
@@ -106,6 +106,7 @@ Errors are `{error, code, hint, next}`. `next` is the command that makes sense n
 - Secrets never go into the fleet repo. `.env` lives on the server; credentials are references (`op://…`, `env:NAME`, `file:path`).
 - `policies.maintenance_window` (UTC) limits server changes (`apply`, `bootstrap`, `provision`); outside it they fail with `outside_maintenance_window`. Only pass `--outside-window` when the user explicitly agrees. App deploys and rollbacks are never restricted.
 - `policies.protected` lists things fornax will not delete. Do not edit it to get a delete through unless the user explicitly asks.
+- Node apps (Next.js etc.): `fornax site add <server> <domain> --repo … --preset node --start 'bun run start -H 127.0.0.1'` (the server needs `tools: [node]`, or bun for a bun start). A deploy starts the release on the idle slot's port and switches nginx only once it answers — `fornax logs <site> app` is its output, `fornax explain <site>` shows which slot serves.
 - A site with `adopted: true` was taken over from Forge: fornax manages its listed `files` byte for byte. Do not switch `generate` or `deploy` on without the user.
 - Webhook deploys (push-to-deploy) need `webhook: { domain: … }` on the server and `fornax git connect <site>` once.
 - fornax on a server updates itself before deploy/rollback/backup commands when it is older ("updated fornax on …"); a plan showing only "fornax binary on the server" is that same update and harmless.

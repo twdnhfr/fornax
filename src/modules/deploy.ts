@@ -83,6 +83,20 @@ ${location}
 `;
 }
 
+/**
+ * The probe of the server's fornax: its sha256 — or `sha` itself (in sync) when it is a newer build
+ * than this one (`build`), so that an apply from an older fornax never downgrades it. Build stamps
+ * are ISO times and compare as strings; a binary without one is older than any stamped build.
+ */
+export function binaryProbe(sha: string, build: string | undefined, bin = "/usr/local/bin/fornax"): string {
+  const hash = `sha256sum ${q(bin)} | cut -c1-64`;
+  if (!build) return `[ -x ${q(bin)} ] && ${hash} || echo missing`;
+  return `if [ -x ${q(bin)} ]; then
+  b=$(${q(bin)} --version --json 2>/dev/null | sed -n 's/.*"build":"\\([^"]*\\)".*/\\1/p')
+  if [ -n "$b" ] && [ "$b" != ${q(build)} ] && [ "$(printf '%s\\n%s\\n' "$b" ${q(build)} | LC_ALL=C sort | tail -n1)" = "$b" ]; then echo ${q(sha)}; else ${hash}; fi
+else echo missing; fi`;
+}
+
 /** The Linux build of fornax on the server — needed by deploys and backups alike (identical resources merge). */
 export function binaryResource(ctx: ModuleCtx): Resource | undefined {
   const bin = ctx.facts.binary;
@@ -93,7 +107,7 @@ export function binaryResource(ctx: ModuleCtx): Resource | undefined {
     kind: "check",
     owner: "fornax",
     summary: `fornax binary on the server (${bin.sha.slice(0, 12)})`,
-    probe: "[ -x /usr/local/bin/fornax ] && sha256sum /usr/local/bin/fornax | cut -c1-64 || echo missing",
+    probe: binaryProbe(bin.sha, bin.build),
     desired: bin.sha,
     apply: `install -m 0755 ${q(staged)} /usr/local/bin/fornax && rm -f ${q(staged)}`,
     handler: deploying(ctx).length ? "fornax-hook" : undefined,

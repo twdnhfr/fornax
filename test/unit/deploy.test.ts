@@ -108,3 +108,28 @@ describe("GitHub client (fake API)", () => {
     srv.stop();
   });
 });
+
+describe("fornax on the server", async () => {
+  const { binaryProbe } = await import("../../src/modules/deploy.ts");
+  const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  /** A stand-in for the server's binary that reports `build`; the probe's output for this build. */
+  const probe = (serverBuild: string | null, ours: string | undefined) => {
+    const bin = join(mkdtempSync(join(tmpdir(), "fornax-bin-")), "fornax");
+    writeFileSync(bin, `#!/bin/sh\necho '${JSON.stringify({ version: "1.0.0", build: serverBuild })}'\n`);
+    chmodSync(bin, 0o755);
+    return Bun.spawnSync(["sh", "-c", binaryProbe("ours-sha", ours, bin)]).stdout.toString().trim();
+  };
+  test("apply never downgrades: a newer build on the server counts as in sync", () => {
+    expect(probe("2026-11-02T10:00:00Z", "2026-11-01T10:00:00Z")).toBe("ours-sha");
+  });
+  test("an older, equal or unstamped build on the server is replaced", () => {
+    expect(probe("2026-10-01T10:00:00Z", "2026-11-01T10:00:00Z")).toMatch(/^[0-9a-f]{64}$/);
+    expect(probe("2026-11-01T10:00:00Z", "2026-11-01T10:00:00Z")).toMatch(/^[0-9a-f]{64}$/);
+    expect(probe(null, "2026-11-01T10:00:00Z")).toMatch(/^[0-9a-f]{64}$/);
+  });
+  test("an unstamped build of ours compares by checksum only", () => {
+    expect(probe("2026-11-02T10:00:00Z", undefined)).toMatch(/^[0-9a-f]{64}$/);
+  });
+});

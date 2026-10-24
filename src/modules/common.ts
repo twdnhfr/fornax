@@ -22,7 +22,7 @@ export interface Facts {
   version: string;
   /** Whether the ondrej/php PPA serves this Ubuntu release (several PHP versions side by side). */
   phpPpa: boolean;
-  binary?: { path: string; sha: string };
+  binary?: { path: string; sha: string; build?: string };
   /** Backup heartbeat URL resolved for this plan (value stays in memory, only its hash is planned). */
   heartbeat?: { value: string; ref?: string };
   /** ntfy access token resolved for this plan (same handling as the heartbeat). */

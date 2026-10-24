@@ -2,7 +2,7 @@
 
 | Tier | Commands | |
 | --- | --- | --- |
-| `read` | `status`, `logs`, `explain`, `plan`, `diff`, `ssl status`, `releases`, `env pull` … | never change a server |
+| `read` | `server status`, `logs`, `explain`, `plan`, `diff`, `ssl status`, `releases`, `env pull` … | never change a server |
 | `write` | `apply`, `deploy`, `rollback`, `env push`, `server create`, `dns sync` … | change servers or remote APIs |
 | `destroy` | `site remove`, `server destroy`, `server reinstall` | also need `--confirm=<exact name>` |
 

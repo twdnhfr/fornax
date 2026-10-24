@@ -8,7 +8,7 @@ From 1.0.0 on, fornax follows [semantic versioning](https://semver.org). Within 
 
 - **Older configs keep loading.** fornax upgrades them in memory and says so on stderr (`note: this fleet config is version 1 …`). Nothing is written: commands that edit the fleet (`site add`, `site alias`, …) keep the file in its version. `fornax fleet upgrade` writes the upgrade, changing only the lines that change — review it with `git diff` and commit.
 - **A newer config is refused** with `config_too_new`, never guessed at. Update fornax on every machine that works on a fleet before anyone runs `fornax fleet upgrade`.
-- **A key never changes its meaning in place.** A rename or a new meaning is a new config version with an upgrade step; every 1.x release loads every config version a 1.x release wrote.
+- **A key never changes its meaning in place.** A rename or a new meaning is a new config version with an upgrade step; every later 1.x release loads every config version an earlier one wrote.
 - **New keys are optional.** Minor releases may add keys with a default that keeps the old behaviour. Unknown keys are errors (`config_invalid`), so a fleet that uses a key added in 1.y needs fornax 1.y or newer.
 - Secret references (`op://…`, `env:NAME`, `file:path`, `keychain:service`) are part of the format.
 
@@ -18,7 +18,7 @@ From 1.0.0 on, fornax follows [semantic versioning](https://semver.org). Within 
 
 - **Command names, arguments, options and their defaults stay.** New commands and options may be added; nothing is removed or renamed within 1.x.
 - **Syntax:** long options only (`--name value` or `--name=value`); `-h` is `--help`. Lists take commas or repeat the option (`--site a,b` = `--site a --site b`). Switches are `--x`, `--no-x` or `--x=true|false`. An unknown option is an error, never ignored. The global options (`--json`, `--verbose`, `--fleet <dir>`, `--help`) work before or after the command; everything after `--` belongs to the command `fornax run` runs.
-- **Commands never prompt.** What is missing is an error with a hint. The exceptions are `fornax shell` (interactive by design), and the PIN and touch of a security key or the unlock of the 1Password app.
+- **Commands never prompt.** What is missing is an error with a hint. The exceptions are `fornax shell` (interactive by design), `fornax fleet restore` (the recovery path: `ssh` and `age` may ask on the terminal), and the PIN and touch of a security key or the unlock of the 1Password app.
 - **Commands fornax runs on servers** — `release`, `notify-test`, `hook serve`, `backup-agent run|snapshots|restore` — are hidden from help and not meant to be run by hand. Their arguments and JSON stay compatible within 1.x too, because the fornax on a server may be newer than the one that calls it (see [the binary on a server](#the-binary-on-a-server)).
 - **Environment:** `FORNAX_FLEET` (the fleet outside a fleet repo; else `~/.config/fornax/fleet`), `FORNAX_REMOTE_BINARY` (the Linux build for servers) and `FORNAX_ACTOR` (the name in `/etc`'s history) are covered. Other `FORNAX_*` variables exist for tests and are not.
 
@@ -26,8 +26,8 @@ From 1.0.0 on, fornax follows [semantic versioning](https://semver.org). Within 
 
 - With `--json`, stdout carries exactly one JSON document: the result, or an error. Progress, notes and warnings go to stderr.
 - **Fields are only added.** Within 1.x no field is removed, renamed or given another type (`null` included: a field that is never `null` does not become `null`). Read the fields you need and ignore the rest; the order of keys means nothing.
-- The list commands (`server list`, `site list`, `provider list`, `provider catalog`) print an array; every other command prints an object. `fornax shell` is interactive and has no `--json`.
-- A result is never an error: only an error has the top-level keys `error` and `code`. A result can still come with a non-zero exit code (a failed deploy, an unhealthy server; see [exit codes](#exit-codes)).
+- The list commands (`server list`, `site list`, `provider list`, `provider catalog`) print an array (so does the internal `backup-agent snapshots`); every other command prints an object. `fornax shell` is interactive and has no `--json`.
+- A result is never an error: an error is an object with both `error` and `code` (strings), and no result has both. Some results have one of them — a failed deploy carries its `error`, `run` its exit code as `code` — so check for `code` being a string, or for both keys. A result can still come with a non-zero exit code (a failed deploy, an unhealthy server; see [exit codes](#exit-codes)).
 - The same rules hold for the command descriptions in `fornax agent-context --json`, `fornax help --json` and `fornax <command> --help --json`.
 
 ## Errors
@@ -73,6 +73,7 @@ Without `--json` it goes to stderr as `error [<code>]: <message>`, followed by `
 | `remote_failed`, `upload_failed`, `probe_failed` | a script or upload on the server failed |
 | `unsupported_os`, `legacy_layout` | the server runs an unsupported OS, or was set up under fornax's old name (one full plan + apply moves it) |
 | `plan_stale`, `plan_expired`, `upload_missing`, `apply_locked`, `nothing_to_apply` | the plan cannot be applied as it is: make a new one, or wait for the other apply |
+| `apply_failed`, `validation_failed` | a step of the apply failed on the server (`details` names the step and the log), or nginx, PHP-FPM, sshd or sudoers rejected the new config and the previous files were restored |
 | `nothing_to_bootstrap` | `server bootstrap` on a server that manages neither `base` nor `access` |
 | `deploy_failed`, `rollback_failed`, `notify_failed`, `hook_unreachable` | a deploy left no result, a rollback or test notification failed, the webhook did not answer (a deploy that fails is a result with exit code 1, not an error) |
 | `backup_failed`, `restore_failed`, `backup_error` | a backup or restore failed (`backup_error`: on the server) |
@@ -163,7 +164,7 @@ Servers that deploy or back up run the Linux build of the fornax you run (`FORNA
 - `apply` installs your build when the server's differs (by checksum).
 - `deploy`, `rollback`, `backup run`, `backup restore` and `notify test` do the same first, so a fix in the deploy or backup code reaches the server without an apply. `server_binary: manual` in `fornax.yaml` leaves that to `apply`.
 - **Never a downgrade:** a server whose build is newer than yours is left as it is (those commands say so on stderr; for `apply` it counts as in sync). A build without a build time counts as older than any build with one.
-- The new file is uploaded to a staging path, checked against its checksum and moved into place atomically; a deploy running at that moment finishes with the old one. The webhook is restarted.
+- The new file is uploaded to a staging path and installed over the old one; a deploy running at that moment finishes with the old one. Before `deploy` and the others it is checked against its checksum on the server and moved into place atomically. The webhook is restarted.
 
 Because a server can run a newer fornax than the one calling it, the commands fornax runs there stay compatible within 1.x (see [commands](#commands-and-options)).
 

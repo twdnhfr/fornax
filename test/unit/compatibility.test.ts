@@ -22,7 +22,19 @@ describe("docs/compatibility.md", () => {
   test("every error code fornax raises is listed", () => {
     const codes = new Set<string>();
     for (const f of new Glob("src/**/*.ts").scanSync(ROOT)) {
-      for (const m of readFileSync(join(ROOT, f), "utf8").matchAll(/(?:\bfail|new FornaxError)\(\s*"([a-z_]+)"/g)) codes.add(m[1]!);
+      const src = readFileSync(join(ROOT, f), "utf8");
+      // every string in the first argument: codes also come from a choice (`ok ? "a_failed" : "b_failed"`)
+      for (const m of src.matchAll(/(?:\bfail|new FornaxError)\(/g)) {
+        let depth = 0;
+        let end = m.index! + m[0].length;
+        for (; end < src.length; end++) {
+          const ch = src[end]!;
+          if ("([{".includes(ch)) depth++;
+          else if (")]}".includes(ch) && depth-- === 0) break;
+          else if (ch === "," && depth === 0) break;
+        }
+        for (const c of src.slice(m.index! + m[0].length, end).matchAll(/"([a-z_]+)"/g)) codes.add(c[1]!);
+      }
     }
     expect(codes.size).toBeGreaterThan(50);
     const missing = [...codes].filter((c) => !doc.includes(`\`${c}\``));

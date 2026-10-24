@@ -39,7 +39,7 @@ string · required
 
 ### `preview_domain`
 
-string (a lower-case host name) · optional
+string (a lower-case host name; not an IP address (&lt;ip with dashes>.sslip.io is a name for one, e.g. 192-0-2-10.sslip.io)) · optional
 
 A domain of yours whose subdomains reach the fleet's servers (a wildcard record, or `fornax dns sync`): `--preview` hands out names from it, two words like quiet-harbor.&lt;preview_domain> — for sites without a domain of their own yet, or instead of a provider's throwaway domains.
 
@@ -665,7 +665,7 @@ string matching `^[a-z_][a-z0-9_-]{0,31}$` · optional
 
 ### `sites.<domain>.aliases`
 
-list of strings (a lower-case host name) · default `[]`
+list of strings (a lower-case host name; not an IP address (&lt;ip with dashes>.sslip.io is a name for one, e.g. 192-0-2-10.sslip.io)) · default `[]`
 
 ### `sites.<domain>.proxies`
 
@@ -675,7 +675,7 @@ Extra names that proxy to a local port instead of serving the app (e.g. a Reverb
 
 ### `sites.<domain>.proxies[].domain`
 
-string (a lower-case host name) · required
+string (a lower-case host name; not an IP address (&lt;ip with dashes>.sslip.io is a name for one, e.g. 192-0-2-10.sslip.io)) · required
 
 ### `sites.<domain>.proxies[].port`
 
@@ -843,7 +843,7 @@ boolean · default `false`
 
 ### `sites.<domain>.redirects`
 
-list of strings (a lower-case host name) · default `[]`
+list of strings (a lower-case host name; not an IP address (&lt;ip with dashes>.sslip.io is a name for one, e.g. 192-0-2-10.sslip.io)) · default `[]`
 
 Names that only send visitors on to the site's domain (301, path kept) — e.g. another TLD of the brand. In the certificate.
 

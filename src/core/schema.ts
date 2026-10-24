@@ -1,9 +1,12 @@
 import { z } from "zod";
+import { isIPv4 } from "./names.ts";
 
 // Values from the fleet end up in root's shell, cron, supervisor and nginx configs: each field
 // takes only the characters its job needs, and only the free-text fields may span lines.
 /** A lower-case host name (sites, aliases, proxies, the webhook). */
 export const Hostname = z.string().regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/, "a lower-case host name");
+/** A name a site answers to: an IP address is none (no certificate, no SNI). */
+const SiteName = Hostname.refine((h) => !isIPv4(h), "not an IP address (<ip with dashes>.sslip.io is a name for one, e.g. 192-0-2-10.sslip.io)");
 /** A path of plain characters: no spaces, quotes, `;`, `$` or newlines. */
 const PlainPath = z.string().regex(/^[\w./~@+-]*$/, "letters, digits and . / ~ @ + - _ only");
 /** Relative to a site directory and staying inside it. */
@@ -30,6 +33,7 @@ export const FileSchema = z
   });
 
 export const PRESETS = ["laravel", "php", "static", "node"] as const;
+export type Preset = (typeof PRESETS)[number];
 
 export const DaemonSchema = z.strictObject({
   name: z.string().regex(/^[a-z0-9-]+$/).optional(),
@@ -55,7 +59,7 @@ export const SiteSchema = z.strictObject({
   repo: z.string().regex(/^[\w@:/.~+-]+$/, "owner/name or a git URL").refine((r) => !r.startsWith("-"), "must not start with -").optional(),
   branch: z.string().regex(/^[\w./+-]+$/, "a git branch name").refine((b) => !b.startsWith("-") && !b.includes(".."), "a git branch name").default("main"),
   user: z.string().regex(/^[a-z_][a-z0-9_-]{0,31}$/).optional(),
-  aliases: z.array(Hostname).default([]),
+  aliases: z.array(SiteName).default([]),
   /**
    * Extra names that proxy to a local port instead of serving the app (e.g. a Reverb websocket
    * server on ws.<domain>). Covered by the site's certificate; cert/key only for tls "existing".
@@ -63,7 +67,7 @@ export const SiteSchema = z.strictObject({
   proxies: z
     .array(
       z.strictObject({
-        domain: Hostname,
+        domain: SiteName,
         port: z.number().int().min(1).max(65535),
         websocket: z.boolean().default(true),
         cert: z.string().optional(),
@@ -132,7 +136,7 @@ export const SiteSchema = z.strictObject({
     .default({}),
   www_redirect: z.boolean().default(false),
   /** Names that only send visitors on to the site's domain (301, path kept) — e.g. another TLD of the brand. In the certificate. */
-  redirects: z.array(Hostname).default([]),
+  redirects: z.array(SiteName).default([]),
   /** Path a new release must answer (2xx/3xx) before and after it goes live; preset node checks "/" without it. */
   health_check: z.string().regex(/^\/?[\w./~@+%=&?-]*$/, "a URL path such as /up").optional(),
   deploy: z
@@ -301,7 +305,7 @@ export const FleetSchema = z.strictObject({
    * sync`): `--preview` hands out names from it, two words like quiet-harbor.<preview_domain> —
    * for sites without a domain of their own yet, or instead of a provider's throwaway domains.
    */
-  preview_domain: Hostname.optional(),
+  preview_domain: SiteName.optional(),
   access: z.enum(["ssh", "tailscale"]).default("ssh"),
   /** Linux admin user on servers fornax sets up (default "fornax"; servers from before the rename keep "anvil"). */
   admin_user: z.string().regex(/^[a-z_][a-z0-9_-]{0,31}$/).optional(),

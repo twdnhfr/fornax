@@ -119,7 +119,7 @@ describe("preview names", () => {
   const preview = () => fleet({ "fornax.yaml": "version: 2\nfleet: t\npreview_domain: preview.example.com\n", "servers/web-1.yaml": "server: web-1\nhost: 203.0.113.10\nsites:\n  shop.example.com:\n    repo: acme/shop\n" });
   test("site add --preview names the site under preview_domain", async () => {
     const dir = preview();
-    expect(await main(["site", "add", "web-1", "--preview", "--repo", "acme/demo", "--fleet", dir, "--json"])).toBe(0);
+    expect(await main(["site", "add", "web-1", "--preview", "--repo", "acme/demo", "--preset", "static", "--fleet", dir, "--json"])).toBe(0);
     const names = Object.keys(loadFleet({ cwd: dir }).servers.get("web-1")!.sites);
     expect(names.find((n) => n !== "shop.example.com")).toMatch(/^[a-z]+-[a-z]+\.preview\.example\.com$/);
   });
@@ -133,8 +133,75 @@ describe("preview names", () => {
     expect(await main(["site", "alias", "shop.example.com", "--remove", aliases[0]!, "--fleet", dir, "--json"])).toBe(0);
     expect(loadFleet({ cwd: dir }).servers.get("web-1")!.sites["shop.example.com"]!.aliases).toEqual([]);
   });
-  test("without preview_domain, --preview says what to set", async () => {
+  test("without preview_domain, --preview names the site after the server's IP (sslip.io)", async () => {
     const dir = fleet({ "fornax.yaml": "version: 2\nfleet: t\n", "servers/web-1.yaml": server });
+    expect(await main(["site", "add", "web-1", "--preview", "--preset", "static", "--fleet", dir, "--json"])).toBe(0);
+    const names = Object.keys(loadFleet({ cwd: dir }).servers.get("web-1")!.sites);
+    expect(names.find((n) => n !== "shop.example.com")).toMatch(/^[a-z]+-[a-z]+\.203-0-113-10\.sslip\.io$/);
+  });
+  test("without preview_domain or an IPv4 address, --preview says what to set", async () => {
+    const dir = fleet({ "fornax.yaml": "version: 2\nfleet: t\n", "servers/web-1.yaml": server.replace("203.0.113.10", "web-1.example.com") });
     expect(await main(["site", "add", "web-1", "--preview", "--fleet", dir, "--json"])).toBe(1);
+  });
+
+});
+
+describe("sites without a domain of their own", () => {
+  const plain = () => fleet({ "fornax.yaml": "version: 2\nfleet: t\n", "servers/web-1.yaml": "server: web-1\nhost: 192.168.139.130\nsites: {}\n" });
+  const added = (dir: string, domain: string) => loadFleet({ cwd: dir }).servers.get("web-1")!.sites[domain]!;
+  test("an IP address is no site name: refused, with the sslip.io name for it", async () => {
+    const dir = plain();
+    expect(await main(["site", "add", "web-1", "192.168.139.130", "--preset", "static", "--fleet", dir, "--json"])).toBe(1);
+    const yaml = "server: web-1\nhost: 192.168.139.130\nsites:\n  192.168.139.130:\n    preset: static\n";
+    expect(loadError(fleet({ "fornax.yaml": "version: 2\nfleet: t\n", "servers/web-1.yaml": yaml })).hint).toContain("192-168-139-130.sslip.io");
+  });
+  test("names without public DNS get a self-signed certificate; public ones the fleet's issuer", async () => {
+    const dir = plain();
+    expect(await main(["site", "add", "web-1", "192-168-139-130.sslip.io", "--preset", "static", "--fleet", dir, "--json"])).toBe(0);
+    expect(added(dir, "192-168-139-130.sslip.io").tls.issuer).toBe("selfsigned");
+    expect(await main(["site", "add", "web-1", "app.test", "--preset", "static", "--fleet", dir, "--json"])).toBe(0);
+    expect(added(dir, "app.test").tls.issuer).toBe("selfsigned");
+    expect(await main(["site", "add", "web-1", "shop.example.com", "--preset", "static", "--fleet", dir, "--json"])).toBe(0);
+    expect(added(dir, "shop.example.com").tls.issuer).toBeUndefined();
+    expect(await main(["site", "add", "web-1", "own.test", "--preset", "static", "--tls", "none", "--fleet", dir, "--json"])).toBe(0);
+    expect(added(dir, "own.test").tls.issuer).toBe("none");
+  });
+  test("site add reads the preset off the repo", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "fornax-repo-"));
+    const git = (...a: string[]) => Bun.spawnSync(["git", "-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", ...a]);
+    git("init", "-q", "-b", "main");
+    writeFileSync(join(repo, "index.php"), "<?php echo 1;\n");
+    git("add", ".");
+    git("commit", "-qm", "x");
+    const dir = plain();
+    expect(await main(["site", "add", "web-1", "app.example.com", "--repo", `file://${repo}`, "--fleet", dir, "--json"])).toBe(0);
+    expect(added(dir, "app.example.com")).toMatchObject({ preset: "php", web_dir: "." });
+  });
+});
+
+describe("site set", () => {
+  const dir = () => fleet({ "fornax.yaml": "version: 2\nfleet: t\n", "servers/web-1.yaml": server });
+  const spec = (d: string) => loadFleet({ cwd: d }).servers.get("web-1")!.sites["shop.example.com"]!;
+  test("changes settings the CLI way (tls is a word, not the YAML's map)", async () => {
+    const d = dir();
+    expect(await main(["site", "set", "shop.example.com", "--preset", "static", "--web-dir", "dist", "--tls", "none", "--www", "--fleet", d, "--json"])).toBe(0);
+    expect(spec(d)).toMatchObject({ preset: "static", web_dir: "dist", tls: { issuer: "none" }, www_redirect: true });
+    expect(await main(["site", "set", "shop.example.com", "--no-www", "--fleet", d, "--json"])).toBe(0);
+    expect(spec(d).www_redirect).toBe(false);
+  });
+  test("preset node needs a start command; leaving node drops it", async () => {
+    const d = dir();
+    expect(await main(["site", "set", "shop.example.com", "--preset", "node", "--fleet", d, "--json"])).toBe(1);
+    expect(await main(["site", "set", "shop.example.com", "--preset", "node", "--start", "bun run start", "--fleet", d, "--json"])).toBe(0);
+    expect(spec(d).node?.start).toBe("bun run start");
+    expect(await main(["site", "set", "shop.example.com", "--preset", "php", "--fleet", d, "--json"])).toBe(0);
+    expect(spec(d).node).toBeUndefined();
+  });
+  test("a change the fleet refuses as a whole is undone", async () => {
+    const d = dir();
+    const before = readFileSync(join(d, "servers/web-1.yaml"), "utf8");
+    expect(await main(["site", "set", "shop.example.com", "--php", "7.0", "--fleet", d, "--json"])).toBe(1);
+    expect(readFileSync(join(d, "servers/web-1.yaml"), "utf8")).toBe(before);
+    expect(await main(["site", "set", "shop.example.com", "--fleet", d, "--json"])).toBe(1);
   });
 });

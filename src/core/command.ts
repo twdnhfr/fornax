@@ -23,6 +23,8 @@ export interface ArgSpec {
   required?: boolean;
   /** Last positional may swallow the rest of argv. */
   variadic?: boolean;
+  /** A command line (like ssh's): from its first word on, flags fornax does not know belong to it (`df -h`). */
+  command?: boolean;
 }
 
 export interface Context {
@@ -111,12 +113,17 @@ export function parseInput(def: CommandDef, argv: string[]): Input {
   for (const [k, s] of Object.entries(specs)) if (s.default !== undefined) input[camel(k)] = s.default;
 
   const variadic = (def.args ?? []).some((a) => a.variadic);
+  const commandAt = (def.args ?? []).findIndex((a) => a.command);
   const positionals: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i]!;
     if (tok === "--") {
       positionals.push(...argv.slice(i + 1));
       break;
+    }
+    if (commandAt >= 0 && positionals.length > commandAt && tok.startsWith("-") && !(tok.startsWith("--") && splitOnce(tok.slice(2), "=")[0] in specs)) {
+      positionals.push(tok);
+      continue;
     }
     if (tok === "-h") {
       input.help = true;

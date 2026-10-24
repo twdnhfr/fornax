@@ -620,7 +620,7 @@ function viewNewSite(preselect) {
   const domain = h("input", { class: C.input, name: "domain", type: "text", placeholder: "shop.example.com", autocomplete: "off", spellcheck: "false" });
   const preview = h("input", { class: C.checkbox, name: "preview", type: "checkbox" });
   const repo = h("input", { class: C.input, name: "repo", type: "text", placeholder: "acme/shop", autocomplete: "off", spellcheck: "false" });
-  const preset = h("select", { class: C.input, name: "preset" }, state.presets.map((p) => h("option", { value: p }, p)));
+  const preset = h("select", { class: C.input, name: "preset" }, h("option", { value: "" }, "detect from the repo"), state.presets.map((p) => h("option", { value: p }, p)));
   const php = h("select", { class: C.input, name: "php" });
   const db = h("select", { class: C.input, name: "db" }, h("option", { value: "" }, "none"), h("option", { value: "mysql" }, "mysql"), h("option", { value: "postgres" }, "postgres"));
   const schedule = h("input", { class: C.checkbox, name: "schedule", type: "checkbox" });
@@ -638,7 +638,7 @@ function viewNewSite(preselect) {
     const options = {
       preview: preview.checked,
       repo: repo.value.trim(),
-      preset: preset.value === "laravel" ? "" : preset.value,
+      preset: preset.value,
       php: php.value,
       db: db.value,
       schedule: schedule.checked,
@@ -689,7 +689,7 @@ function viewNewSite(preselect) {
           { class: "grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-x-4 gap-y-3" },
           field("server", server),
           field("domain", domain, "leave empty with a preview name"),
-          field("preview name", check(preview, "make one up under the fleet's preview_domain"), "with a domain as well: an extra alias"),
+          field("preview name", check(preview, "make one up under the fleet's preview_domain (without one: under the server's IP, via sslip.io)"), "with a domain as well: an extra alias"),
           field("repo", repo, "owner/name on GitHub, git@…, https://… or file:///…"),
           field("preset", preset),
           field("php", php),

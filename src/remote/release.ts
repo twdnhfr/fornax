@@ -245,6 +245,11 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
     } else {
       const php = `php${rt.php}`;
       const laravel = rt.preset === "laravel";
+      if (laravel && !existsSync(join(dir, "artisan"))) {
+        const has = (f: string) => existsSync(join(dir, f));
+        const fits = has("public/index.php") || has("index.php") ? "php" : has("package.json") && /"start"\s*:/.test(readFileSync(join(dir, "package.json"), "utf8")) ? "node" : "static";
+        throw new StepError(`the repo has no artisan — it is no Laravel app; preset ${fits} looks right: fornax site set ${domain} --preset ${fits}, then plan, apply and deploy again`);
+      }
       if (existsSync(join(dir, "composer.json"))) run(`${php} /usr/local/bin/composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-progress`, { cwd: dir, env });
       // before the frontend build: Tailwind also scans the compiled views in storage/framework/views
       if (laravel) run(`${php} artisan optimize`, { cwd: dir, env });

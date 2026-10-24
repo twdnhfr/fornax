@@ -40,9 +40,9 @@ defineCommand({
   tier: "write",
   args: [
     { name: "site", help: "site domain", required: true },
-    { name: "command", help: "the command, after -- (read by bash, like ssh: quote pipes and redirects as one argument)", required: true, variadic: true },
+    { name: "command", help: "the command (read by bash, like ssh: quote pipes and redirects as one argument; after -- even fornax's own options belong to it)", required: true, variadic: true, command: true },
   ],
-  examples: ["fornax run shop.example.com -- php artisan migrate:status", "fornax run shop.example.com -- 'tail -n 20 storage/logs/laravel.log | grep ERROR'"],
+  examples: ["fornax run shop.example.com -- php artisan migrate:status", "fornax run shop.example.com df -h", "fornax run shop.example.com -- 'tail -n 20 storage/logs/laravel.log | grep ERROR'"],
   async run(input, ctx) {
     const fleet = loadFleet(ctx);
     const { server, site } = findSite(fleet, String(input.site));

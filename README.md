@@ -108,6 +108,8 @@ fornax git connect shop.example.com                      # deploy key + push web
 fornax deploy shop.example.com                           # first deploy; afterwards every push
 ```
 
+`site add` reads the preset off the repo (artisan → laravel, index.php → php, a start script → node, else static); `fornax site set shop.example.com --preset php` changes it later, like the other settings. No domain yet? `fornax site add web-1 --preview` names the site under the fleet's `preview_domain`, or without one under the server's IP via sslip.io (`quiet-harbor.203-0-113-10.sslip.io`).
+
 Or let fornax order the server: `fornax server create --size cax21 --location nbg1` buys it at Hetzner, joins it to your tailnet and provisions it in one go ([servers](docs/servers.md)).
 
 **Coming from Forge?**

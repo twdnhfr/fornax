@@ -4,6 +4,7 @@ import YAML from "yaml";
 import type { z } from "zod";
 import { CONFIG_VERSION, upgradesFrom } from "./config-version.ts";
 import { FornaxError, fail } from "./errors.ts";
+import { isIPv4, sslipDomain } from "./names.ts";
 import { notice } from "./notice.ts";
 import { FleetSchema, ServerSchema, type FleetConfig, type Server, type Site } from "./schema.ts";
 import { resolveSecret } from "./secrets.ts";
@@ -206,6 +207,7 @@ function validateServer(fleet: Fleet, server: Server): void {
   const dbs = new Map<string, string>();
   const admin = server.admin_user ?? fleet.config.admin_user;
   for (const domain of Object.keys(server.sites)) {
+    if (isIPv4(domain)) fail("config_invalid", `${server.server}/${domain}: an IP address, not a name — a site needs one for its vhost and certificate`, `${sslipDomain(domain)} is one: sslip.io resolves it to ${domain}`);
     const site = resolveSite(fleet, server, domain);
     // Forge runs sites without isolation as its admin user "forge": taken over as they are, never purged
     const forgeAdmin = site.spec.adopted && (site.user === "forge" || site.user === admin);

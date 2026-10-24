@@ -65,24 +65,31 @@ defineCommand({
     if (input.via === "public" && !server.public_ipv4) fail("no_public_ip", `${server.server} has no public_ipv4 in its config`);
     const addr = input.via === "public" ? server.public_ipv4! : server.host;
     const paths = (input.path as string[] | undefined) ?? ["/", ...(site.spec.health_check ? [site.spec.health_check] : [])];
-    const results = [];
+    const results: { url: string; status: number | null; redirect: string | null; seconds: number; error?: string }[] = [];
+    // tls none: the site has no HTTPS to ask for
+    const schemes = site.tlsIssuer === "none" ? (["http"] as const) : (["http", "https"] as const);
     for (const name of site.names) {
-      for (const scheme of ["http", "https"] as const) {
+      for (const scheme of schemes) {
         for (const p of name === site.domain ? paths : ["/"]) {
           const port = scheme === "https" ? 443 : 80;
           const r = Bun.spawnSync([
-            "curl", "-sk", "-o", "/dev/null", "--max-time", "15", "--connect-to", `${name}:${port}:${addr}:${port}`,
+            "curl", "-sSk", "-o", "/dev/null", "--max-time", "15", "--connect-to", `${name}:${port}:${addr}:${port}`,
             "-w", "%{http_code} %{redirect_url} %{time_total} %{ssl_verify_result}", `${scheme}://${name}${p}`,
           ]);
           const [code, redirect, time] = r.stdout.toString().split(" ");
-          results.push({ url: `${scheme}://${name}${p}`, status: Number(code) || null, redirect: redirect || null, seconds: Number(time) });
+          // no answer: curl says why (refused, timed out, TLS handshake …)
+          const error = Number(code) ? undefined : r.stderr.toString().trim().split("\n").pop()?.replace(/^curl: \(\d+\) /, "") || `curl exit ${r.exitCode}`;
+          results.push({ url: `${scheme}://${name}${p}`, status: Number(code) || null, redirect: redirect || null, seconds: Number(time), ...(error ? { error } : {}) });
         }
       }
     }
-    const cert = Bun.spawnSync(["bash", "-c", `echo | openssl s_client -connect ${addr}:443 -servername ${site.domain} 2>/dev/null | openssl x509 -noout -issuer -enddate -ext subjectAltName 2>/dev/null`]).stdout.toString();
+    const cert = site.tlsIssuer === "none" ? "" : Bun.spawnSync(["bash", "-c", `echo | openssl s_client -connect ${addr}:443 -servername ${site.domain} 2>/dev/null | openssl x509 -noout -issuer -enddate -ext subjectAltName 2>/dev/null`], { timeout: 15_000 }).stdout.toString();
     const issuer = cert.match(/issuer=.*?(?:O\s*=\s*([^,\n]+))?.*?CN\s*=\s*([^\n]+)/)?.slice(1).filter(Boolean).join(" / ") ?? null;
     const expires = cert.match(/notAfter=(.*)/)?.[1] ?? null;
-    const human = [...results.map((r) => `${String(r.status ?? "ERR").padEnd(4)} ${r.url}${r.redirect ? ` → ${r.redirect}` : ""}`), `certificate: ${issuer ?? "none"}${expires ? `, until ${expires}` : ""}`].join("\n");
+    const human = [
+      ...results.map((r) => `${String(r.status ?? "ERR").padEnd(4)} ${r.url}${r.redirect ? ` → ${r.redirect}` : ""}${r.error ? ` — ${r.error}` : ""}`),
+      site.tlsIssuer === "none" ? "certificate: none (tls: none, HTTP only)" : `certificate: ${issuer ?? "none"}${expires ? `, until ${expires}` : ""}`,
+    ].join("\n");
     return { data: { site: site.domain, via: addr, results, certificate: { issuer, expires } }, human, exitCode: results.some((r) => !r.status || r.status >= 500) ? 1 : 0 };
   },
 });

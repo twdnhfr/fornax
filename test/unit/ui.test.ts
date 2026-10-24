@@ -97,7 +97,7 @@ describe("fornax ui: commands", () => {
   });
 
   test("site add runs through the registry and edits the fleet", async () => {
-    const ev = await events(await post({ command: "site add", args: ["t-1", "shop.example.com"], options: { repo: "acme/shop", db: "postgres", schedule: true, daemon: ["php artisan horizon"] } }));
+    const ev = await events(await post({ command: "site add", args: ["t-1", "shop.example.com"], options: { repo: "acme/shop", preset: "laravel", db: "postgres", schedule: true, daemon: ["php artisan horizon"] } }));
     const result = ev.find((e) => e.t === "result") as Extract<RunEvent, { t: "result" }>;
     expect(result.exitCode).toBe(0);
     // the server's first site: the whole server is the next step

@@ -129,7 +129,7 @@ Every command has a tier (`tier:` in its help, `tier` in `agent-context --json`)
 | Tier | Commands |
 | --- | --- |
 | `read` | `agent-context`, `server list`, `site list`, `server status`, `ssl status`, `logs`, `explain`, `tailnet status`, `health`, `secrets list`, `plan`, `diff`, `releases`, `git key`, `env pull`, `env diff`, `provider list`, `provider catalog`, `dns status`, `backup status`, `backup list`, `backup key`, `site check`, `history`, `fleet copies`, `ui` |
-| `write` | `init`, `fleet upgrade`, `server add`, `site add`, `site alias`, `tailnet sync`, `secrets setup`, `secrets sync`, `apply`, `server bootstrap`, `server provision`, `notify test`, `deploy`, `rollback`, `git connect`, `env push`, `server create`, `server rename`, `server snapshot`, `server rdns`, `dns sync`, `import forge`, `detach forge`, `backup run`, `backup restore`, `site convert`, `shell`, `run`, `fleet push`, `fleet restore` |
+| `write` | `init`, `fleet upgrade`, `server add`, `site add`, `site set`, `site alias`, `tailnet sync`, `secrets setup`, `secrets sync`, `apply`, `server bootstrap`, `server provision`, `notify test`, `deploy`, `rollback`, `git connect`, `env push`, `server create`, `server rename`, `server snapshot`, `server rdns`, `dns sync`, `import forge`, `detach forge`, `backup run`, `backup restore`, `site convert`, `shell`, `run`, `fleet push`, `fleet restore` |
 | `destroy` | `site remove`, `server destroy`, `server reinstall` |
 
 Some write commands delete only in one variant, and then need a confirmation too: `apply` (and the commands that apply: `server bootstrap`, `server provision`, `server create`, `server rename`) when the plan deletes something (`--confirm=<server>`), `backup restore --replace` (`--confirm=<site>`).

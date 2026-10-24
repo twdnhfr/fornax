@@ -50,3 +50,29 @@ export function previewName(previewDomain: string, takenNames: Iterable<string>)
 export function assertServerName(name: string): void {
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) fail("invalid_argument", `"${name}" is not a server name`, "lower-case letters, digits and -, at most 63, like silent-comet");
 }
+
+/** An IPv4 address (a server's host may be one; a site's name may not). */
+export function isIPv4(s: string): boolean {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(s) && s.split(".").every((x) => Number(x) <= 255);
+}
+
+/** Private, loopback, link-local and CGNAT (tailnet) ranges: no CA can reach a name that points there. */
+export function isPrivateIPv4(ip: string): boolean {
+  const [a, b] = ip.split(".").map(Number) as [number, number];
+  return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
+}
+
+/** A name for an IP address that needs no DNS of one's own: sslip.io answers 192-0-2-10.sslip.io (and any name under it) with 192.0.2.10. */
+export function sslipDomain(ip: string): string {
+  return `${ip.replaceAll(".", "-")}.sslip.io`;
+}
+
+/** Names only a local resolver knows (or that point at a private address): no public CA can issue for them. */
+const LOCAL_SUFFIXES = ["test", "local", "localhost", "internal", "lan", "home.arpa", "example", "invalid"];
+
+export function hasPublicDns(name: string): boolean {
+  if (isIPv4(name)) return false;
+  if (LOCAL_SUFFIXES.some((s) => name === s || name.endsWith(`.${s}`))) return false;
+  const ip = name.match(/(?:^|\.)(\d{1,3}[-.]\d{1,3}[-.]\d{1,3}[-.]\d{1,3})\.(?:sslip|nip)\.io$/)?.[1]?.replace(/-/g, ".");
+  return !(ip && isIPv4(ip) && isPrivateIPv4(ip));
+}

@@ -18,6 +18,12 @@ const demo = defineCommand({
 });
 
 describe("argument parsing", () => {
+  test("a command argument keeps the flags fornax does not know, like ssh (df -h)", () => {
+    const run = defineCommand({ name: "test run", summary: "x", tier: "read", args: [{ name: "site", help: "", required: true }, { name: "command", help: "", variadic: true, command: true }], run: async () => ({ data: null }) });
+    expect(parseInput(run, ["s", "df", "-h"]).command).toEqual(["df", "-h"]);
+    expect(parseInput(run, ["s", "ls", "--all", "--json"])).toMatchObject({ command: ["ls", "--all"], json: true });
+    expect(parseInput(run, ["s", "-h"]).help).toBe(true);
+  });
   test("positionals, numbers, lists, booleans", () => {
     const i = parseInput(demo, ["a.example.com", "--lines", "5", "--tag=x,y", "--tag", "z", "--force"]);
     expect(i.site).toBe("a.example.com");

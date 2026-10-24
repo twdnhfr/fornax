@@ -163,7 +163,11 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
     const next = n.slots.find((x) => x !== (pointed ?? n.slots[1]))!;
     const other = n.slots.find((x) => x !== next)!;
     const live = Bun.spawnSync(["systemctl", "is-active", "-q", other.unit]).exitCode === 0 && pointed === other ? other : undefined;
-    const unit = (verb: string, x: { unit: string }) => run(`systemctl ${verb} '${x.unit}'`, { asRoot: true, allowFail: verb.includes("disable") });
+    // a slot that is stopped is done with: no "failed" state left behind for `fornax health` to report
+    const unit = (verb: "restart" | "enable" | "disable --now", x: { unit: string }) =>
+      verb === "disable --now"
+        ? run(`systemctl disable --now '${x.unit}'; systemctl reset-failed '${x.unit}' 2>/dev/null || true`, { asRoot: true, allowFail: true })
+        : run(`systemctl ${verb} '${x.unit}'`, { asRoot: true });
     log(`=> starting ${dir.split("/").pop()} in slot ${next.name} (port ${next.port})${live ? `; slot ${live.name} (port ${live.port}) keeps serving` : ""}`);
     run(`ln -sfn '${dir}' '${next.link}.fornax-tmp' && mv -Tf '${next.link}.fornax-tmp' '${next.link}'`);
     const appLog = join(SITE_LOG_DIR(rt.user), "app.log");
@@ -199,8 +203,10 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
     activate(dir);
     reload();
     if (rt.health_check) {
+      // the app itself passed on its port; through nginx, the site's basic auth or IP rules may
+      // answer (401, 403) — only a gateway error or no answer says nginx does not reach the slot
       log(`=> health check after the switch ${rt.health_check.url}`);
-      if (!(await healthCheck(rt, log))) {
+      if (!(await healthCheck(rt, log, (code) => code >= 200 && code < 500))) {
         if (!live || !previous) throw new StepError("health check failed after the switch and there is no previous release to go back to");
         log(`=> health check failed — switching back to slot ${live.name}`);
         point(live);
@@ -628,14 +634,14 @@ async function previewCheck(rt: SiteRuntime, log: (l: string) => void): Promise<
   return false;
 }
 
-async function healthCheck(rt: SiteRuntime, log: (l: string) => void): Promise<boolean> {
+async function healthCheck(rt: SiteRuntime, log: (l: string) => void, ok = (code: number) => code >= 200 && code < 400): Promise<boolean> {
   const hc = rt.health_check!;
   const port = hc.https ? 443 : 80;
   for (let i = 1; i <= 5; i++) {
     const p = Bun.spawnSync(["curl", "-sk", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", "--resolve", `${hc.host}:${port}:127.0.0.1`, hc.url]);
     const code = Number(p.stdout.toString().trim());
     log(`   attempt ${i}: HTTP ${code || "error"}`);
-    if (code >= 200 && code < 400) return true;
+    if (ok(code)) return true;
     await Bun.sleep(1000 * i);
   }
   return false;

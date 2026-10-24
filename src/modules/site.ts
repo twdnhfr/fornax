@@ -140,6 +140,8 @@ ExecStart=/bin/bash -c "exec ${s.node!.start}"
 Restart=always
 RestartSec=2
 TimeoutStopSec=30
+# stopped with SIGTERM after a switch (package-manager wrappers like bun run then exit 143): not a failure
+SuccessExitStatus=143
 StandardOutput=append:${SITE_LOG_DIR(u)}/app.log
 StandardError=inherit
 UMask=0027
@@ -651,6 +653,8 @@ function removeSite(ctx: ModuleCtx, s: ResolvedSite): Resource[] {
             ),
             flushBefore: true,
           },
+          // the last node app on the server takes the websocket map along
+          ...(ctx.sites.some((x) => x.node && x.spec.state === "present") ? [] : [absent(NODE_MAP_PATH, { owner: "web", handler: "nginx" })]),
         ]
       : []),
     absent(vhostPath(s), { ...o, handler: "nginx" }),

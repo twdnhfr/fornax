@@ -103,9 +103,9 @@ Errors are `{error, code, hint, next}`. `next` is the command that makes sense n
 
 - `legacy_layout`: the server was set up under fornax's old name (anvil). It moves over in one full `fornax plan <server>` + apply (shown in the plan as `rename:`); show the user that plan before applying. Never move files by hand.
 - `config_invalid` names the key: unknown keys are errors, so fix the spelling instead of adding the key elsewhere. `config_too_new`: the fleet needs a newer fornax. The note "fleet config is version N … read as upgraded" means `fornax fleet upgrade` would rewrite it — that edits only the fleet repo; let the user review the diff.
-- Secrets never go into the fleet repo. `.env` lives on the server; credentials are references (`op://…`, `env:NAME`, `file:path`).
+- Secrets never go into the fleet repo. `.env` lives on the server; credentials are references (`op://…`, `env:NAME`, `file:path`, `keychain:service`).
 - `policies.maintenance_window` (UTC) limits server changes (`apply`, `bootstrap`, `provision`); outside it they fail with `outside_maintenance_window`. Only pass `--outside-window` when the user explicitly agrees. App deploys and rollbacks are never restricted.
 - `policies.protected` lists things fornax will not delete. Do not edit it to get a delete through unless the user explicitly asks.
 - A site with `adopted: true` was taken over from Forge: fornax manages its listed `files` byte for byte. Do not switch `generate` or `deploy` on without the user.
-- Webhook deploys (push-to-deploy) need `webhook: { domain: … }` on the server and `fornax git connect <site>` once.
+- Push-to-deploy needs `fornax git connect <site>` once; GitHub then posts to `https://<site>/.well-known/fornax-hook`, so no extra hostname or DNS record is needed.
 - fornax on a server updates itself before deploy/rollback/backup commands when it is older ("updated fornax on …"); a plan showing only "fornax binary on the server" is that same update and harmless.

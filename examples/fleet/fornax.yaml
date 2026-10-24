@@ -41,5 +41,5 @@ notify:
     url: https://ntfy.sh/acme-deploys-x7k2q9   # pick an unguessable topic; subscribe to it in the ntfy app
     email: ops@example.com                # ntfy forwards each message as mail too
   # on: always                            # also report successful deploys
-  # url: https://hooks.example.com/fornax  # JSON event for every deploy
+  # webhook: https://hooks.example.com/fornax  # JSON event for every deploy
   github_status: false

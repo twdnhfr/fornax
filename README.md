@@ -78,10 +78,25 @@ plan 3f9c2a1e saved — review, then: fornax apply 3f9c2a1e
 | **Adopted** | A site or file taken over from Forge exactly as it is. `fornax site convert` hands it to fornax area by area. |
 | **Tier** | Every command is `read`, `write` or `destroy`. Destroying needs `--confirm=<name>`; agents can be allowed the read tier only. |
 
+## Install
+
+Each [release](https://github.com/twdnhfr/fornax/releases) has an archive per machine — `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64` — and `SHA256SUMS`. An archive holds `fornax` and the two Linux builds it puts on servers; keep them together:
+
+```bash
+v=0.1.0 t=darwin-arm64
+curl -fsSLO "https://github.com/twdnhfr/fornax/releases/download/v$v/fornax-$v-$t.tar.gz"
+mkdir -p ~/.local/lib/fornax ~/.local/bin && tar -xzf "fornax-$v-$t.tar.gz" -C ~/.local/lib/fornax
+ln -sf ~/.local/lib/fornax/fornax ~/.local/bin/fornax   # or any other directory on your PATH
+fornax --version
+```
+
+A release also carries a Homebrew formula (`fornax.rb`) that installs the same archive. To run fornax from a checkout instead, see [CONTRIBUTING.md](CONTRIBUTING.md#building-and-running-from-source).
+
 ## Quickstart
 
 ```bash
 fornax init ./fleet --fleet-name acme && cd fleet
+fornax secrets setup                                     # optional: a 1Password vault for every credential fornax creates
 fornax server add web-1 --host 203.0.113.10 --php 8.5   # Ubuntu 24.04/26.04, root SSH
 fornax server bootstrap web-1                            # base packages, admin user, SSH hardening, firewall
 fornax server provision web-1                            # nginx, PHP, databases, Redis, supervisor …
@@ -139,7 +154,7 @@ fornax history web-1 --path nginx     # who changed what in /etc, and when
 
 - **Your machine:** macOS or Linux. fornax is a single binary (or `bun src/cli.ts` from a checkout); it uses your `ssh`, and `op` for 1Password.
 - **Servers:** Ubuntu 24.04 or 26.04 LTS, arm64 or x86_64, root SSH (or a sudo user). Any provider.
-- **Optional:** Tailscale, 1Password, Hetzner Cloud or DigitalOcean (ordering servers), Cloudflare (DNS), a Hetzner Storage Box (backups), a FIDO2 key, GitHub (push-to-deploy).
+- **Optional:** Tailscale, 1Password, `age` (encrypted fleet copies), Hetzner Cloud or DigitalOcean (ordering servers), Cloudflare (DNS), a Hetzner Storage Box (backups), a FIDO2 key, GitHub (push-to-deploy).
 
 ## Status
 

@@ -60,7 +60,7 @@ orb create ubuntu:resolute fornax-base-2604                         # Ubuntu 26.
 
 Install `openssh-server` on each and put `.dev/id_ed25519.pub` into root's `authorized_keys`; the tests clone these machines and never change them. Then `bun run test:int` (see [development](docs/development.md) for the 26.04 run). Changes to what fornax does on a server — modules, deploys, backups, the Forge takeover — should pass the integration tests, and add to them where unit tests cannot reach.
 
-**Live tests** (`test/live/`) order real servers at Hetzner and cost money. Run them only with throwaway infrastructure: a cloud project, a 1Password vault and DNS names (the test uses sslip.io and Let's Encrypt staging) that hold nothing else. Never point any test at servers or accounts that matter.
+**Live tests** (`test/live/`) order real servers at Hetzner and cost money. Run them only with throwaway infrastructure: a cloud project, a 1Password vault and DNS names (the test uses sslip.io and Let's Encrypt staging) that hold nothing else. How to run them is at the top of `test/live/hetzner.ts`. Never point any test at servers or accounts that matter.
 
 ## Design rules
 

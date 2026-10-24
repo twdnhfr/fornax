@@ -8,7 +8,6 @@ php: ["8.4", "8.5"]
 services: [mysql, postgres, redis, supervisor, fail2ban]
 tools: [composer, bun]
 swap: 2G
-webhook: { domain: hooks.example.com }
 
 sites:
   shop.example.com:

@@ -14,7 +14,7 @@ fornax runs as root on your servers. What it trusts decides what an attacker has
 | Secret stores (1Password, Keychain, env, files) | **yes** | References are resolved on your machine only while applying. |
 | SSH to the servers | **yes, after first contact** | Host keys are pinned on first use (see limits). |
 | **Site code and site users** | **no** | A site's app, its dependencies and its build scripts may be compromised. They run as the site's own Linux user. |
-| **Webhook callers** | **no** | The internet reaches `https://<hook_domain>/fornax/hook/<site>`. |
+| **Webhook callers** | **no** | The internet reaches `https://<site>/.well-known/fornax-hook` (and `/fornax/hook/<site>` on a server's `webhook.domain`). |
 | Git hosts | partly | GitHub's host key is pinned; what the repo contains runs as the site user only. |
 
 ### What fornax guarantees
@@ -36,10 +36,10 @@ fornax runs as root on your servers. What it trusts decides what an attacker has
 - **Host keys are trusted on first use**, for servers and for the Storage Box (whose password `sshpass` sends at first contact). Make the first contact over a network you trust, or put the host keys in `known_hosts` yourself.
 - **The plan file is executed as stored.** `fornax apply <id>` checks that the server has not changed since the plan, not that `.fornax/plans/<id>.json` is unchanged — protect the fleet directory like the fleet repo.
 - **/etc's history (`fornax history`) is kept on the server itself.** It explains changes by fornax, packages and hand; it is no evidence after a break-in — whoever has root can rewrite it. Private keys and generated secrets are excluded from it; `/etc/shadow` (password hashes) is tracked as etckeeper does by default, readable by root only, and never shown by `fornax history --show`.
-- **A security key protects new connections, not open ones.** fornax keeps one connection per server for 10 minutes (ControlPersist) so a run asks for one touch per server; while it is open, whoever runs as you on your machine can use it. Lose the key and you lose root: register a second key in `ssh.root_keys`, and keep the provider's rescue system (with the fleet key) as the way back in.
+- **A security key protects new connections, not open ones.** fornax keeps one connection per server open for `ssh.keep_open` (default 10 minutes, ControlPersist) so a run asks for one touch per server; while it is open, whoever runs as you on your machine can use it. Lose the key and you lose root: register a second key in `ssh.root_keys`, and keep the provider's rescue system (with the fleet key) as the way back in.
 - **The fleet key signs the fleet copies.** Whoever holds `ssh.key` (the fleet's 1Password vault, or fornax's agent while it runs) can sign a copy that restore accepts. And age-plugin-fido2-hmac calls itself experimental before 1.0 — keep a paper key among the recipients.
 - **Webhook requests can be replayed**: a recorded, validly signed push triggers that deploy again (of a commit that was pushed before).
-- **`notify.url` is stored as written** in the fleet repo and in the root/webhook-readable deploy config on the server. For webhook URLs that carry a token, prefer ntfy with `notify.ntfy.token` (a secret reference).
+- **`notify.webhook` is stored as written** in the fleet repo and in the root/webhook-readable deploy config on the server. For webhook URLs that carry a token, prefer ntfy with `notify.ntfy.token` (a secret reference).
 - Sites adopted from Forge keep Forge's vhosts, pools and supervisor configs byte for byte until they are converted (`fornax site convert`); the guarantees above apply to what fornax generates.
 
 ## For contributors

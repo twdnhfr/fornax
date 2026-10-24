@@ -141,7 +141,7 @@ These paths and names keep their meaning within 1.x. Should one ever have to mov
 | `/usr/local/sbin/fornax-trigger` | the one command the webhook may run via sudo |
 | `/etc/fornax/` | what fornax keeps on the server: deploy config per site (`sites/<domain>.json`), webhook secrets (`hook-secrets/`), generated secrets (`secrets/`, root only), certificates (`tls/<domain>/`), Redis configs (`redis/`), the backup config (`backup/`), pinned host keys (`known_hosts`) |
 | `/var/lib/fornax/` | state: deploy requests, backup status and staging, restores, the fleet copy, ACME challenges |
-| `/var/log/fornax/` | every script fornax ran on the server, with its output |
+| `/var/log/fornax/` | the script of every apply, with its output |
 | `/var/log/fornax-sites/<user>/` | a site's daemon logs, and its deploy logs under `deploys/` |
 | `/home/<user>/<domain>/` | the site: `releases/<YYYYMMDDHHMMSS>/`, `current` → the live release, `.env`, `auth.json` and the shared paths (e.g. `storage`) linked into each release. With `deploy.mode: in_place` the directory is the checkout itself. |
 | `fornax-deploy@<domain>.service` | one deploy of a site (push-to-deploy and `fornax deploy`) |

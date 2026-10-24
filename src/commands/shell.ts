@@ -48,8 +48,9 @@ defineCommand({
     const { server, site } = findSite(fleet, String(input.site));
     const command = (input.command as string[]).join(" ");
     if (!command.trim()) fail("missing_argument", "missing the command to run", "fornax run <site> -- <command>");
-    // no stdin: a question the command asks gets end-of-file, not the rest of this script
-    const script = asUser(site.user, siteEnv(site, `${command} </dev/null`));
+    // no stdin: a question the command asks gets end-of-file, not the rest of this script — for the
+    // whole command line, not just its last part (`a | b </dev/null` would starve b)
+    const script = asUser(site.user, siteEnv(site, `{\n${command}\n} </dev/null`));
     const out = (stream: NodeJS.WriteStream) => (ctx.json ? undefined : (l: string) => stream.write(l + "\n"));
     const res = await runnerFor(fleet, server).run(script, { allowFail: true, onStdout: out(process.stdout), onStderr: out(process.stderr) });
     return { data: { site: site.domain, server: server.server, user: site.user, command, code: res.code, stdout: res.stdout, stderr: res.stderr }, human: "", exitCode: res.code };

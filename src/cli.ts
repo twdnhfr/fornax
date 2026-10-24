@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
-import YAML from "yaml";
-import { commands, describeCommand, GLOBAL_OPTIONS, helpText, jsonRequested, parseInput, resolve, type CommandDef, type Context, type Result } from "./core/command.ts";
-import { FornaxError } from "./core/errors.ts";
+import { commands, describeCommand, GLOBAL_OPTIONS, helpText, humanOutput, jsonRequested, parseInput, resolve, type CommandDef, type Context, type Result } from "./core/command.ts";
+import { asFornaxError, FornaxError } from "./core/errors.ts";
 import "./commands/index.ts";
 
 import { BUILD, VERSION } from "./core/version.ts";
@@ -75,10 +74,9 @@ export function hoistOptions(argv: string[]): string[] {
 function print(result: Result, json: boolean) {
   if (json) {
     process.stdout.write(JSON.stringify(result.data, null, 2) + "\n");
-  } else if (result.human !== undefined) {
-    if (result.human) process.stdout.write(result.human.endsWith("\n") ? result.human : result.human + "\n");
-  } else if (result.data !== undefined && result.data !== null) {
-    process.stdout.write(typeof result.data === "string" ? result.data + "\n" : YAML.stringify(result.data));
+  } else {
+    const text = humanOutput(result);
+    if (text) process.stdout.write(text.endsWith("\n") ? text : text + "\n");
   }
 }
 
@@ -130,8 +128,7 @@ export async function main(rawArgv: string[]): Promise<number> {
     print(result, ctx.json);
     return result.exitCode ?? 0;
   } catch (e) {
-    const err =
-      e instanceof FornaxError ? e : new FornaxError("internal_error", (e as Error)?.message ?? String(e), "this is a bug in fornax", undefined, { stack: (e as Error)?.stack });
+    const err = asFornaxError(e);
     if (wantsJson) process.stdout.write(JSON.stringify(err.toJSON(), null, 2) + "\n");
     else {
       process.stderr.write(`error [${err.code}]: ${err.message}\n`);

@@ -3,6 +3,7 @@ import { fail } from "./errors.ts";
 import { secret, type Fleet } from "./fleet.ts";
 import { fleetAgent } from "./ssh-agent.ts";
 import { askpassPath, controlDir } from "./askpass.ts";
+import { notice } from "./notice.ts";
 import { q } from "./shell.ts";
 import type { Server } from "./schema.ts";
 
@@ -130,10 +131,10 @@ export class SshRunner implements Runner {
       const url = line.match(/https:\/\/login\.tailscale\.com\/a\/\S+/)?.[0];
       if (url && !announced.has(url)) {
         announced.add(url);
-        process.stderr.write(`Tailscale asks for a fresh login before SSH to ${this.server.server}: open ${url} — fornax goes on once you have\n`);
+        notice(`Tailscale asks for a fresh login before SSH to ${this.server.server}: open ${url} — fornax goes on once you have`);
       }
       // a hardware key waits for a touch: say so in the terminal too (the dialog may be behind a window)
-      if (/Confirm user presence for key/.test(line)) process.stderr.write(`touch your security key (SSH to ${this.server.server})\n`);
+      if (/Confirm user presence for key/.test(line)) notice(`touch your security key (SSH to ${this.server.server})`);
       opts.onStderr?.(line);
     };
     const [stdout, stderr] = await Promise.all([readLines(proc.stdout, opts.onStdout), readLines(proc.stderr, onStderr)]);

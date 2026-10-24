@@ -14,3 +14,4 @@ import "./tailnet.ts";
 import "./history.ts";
 import "./shell.ts";
 import "./fleet-copy.ts";
+import "./ui.ts";

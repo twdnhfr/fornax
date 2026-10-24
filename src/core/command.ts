@@ -1,3 +1,4 @@
+import YAML from "yaml";
 import { FornaxError, fail } from "./errors.ts";
 
 /**
@@ -42,6 +43,13 @@ export interface Result {
   exitCode?: number;
 }
 
+/** What a human sees of a result: its own rendering, else the data as YAML. */
+export function humanOutput(result: Result): string {
+  if (result.human !== undefined) return result.human;
+  if (result.data === undefined || result.data === null) return "";
+  return typeof result.data === "string" ? result.data : YAML.stringify(result.data);
+}
+
 export type Input = Record<string, unknown> & { _: string[] };
 
 export interface CommandDef {
@@ -53,6 +61,8 @@ export interface CommandDef {
   options?: Record<string, OptionSpec>;
   /** Runs on the server only (deploy machinery); hidden from agent-context lists. */
   internal?: boolean;
+  /** For people at a keyboard (e.g. the dashboard): left out of agent-context, agents use the commands. */
+  humanOnly?: boolean;
   /** Example invocations for help and agent-context. */
   examples?: string[];
   run(input: Input, ctx: Context): Promise<Result>;

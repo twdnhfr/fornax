@@ -5,6 +5,7 @@ bun run test          # unit tests (fake APIs, fixtures)
 bun run typecheck
 bun run docs          # regenerate docs/config.md from src/core/schema.ts
 bun run test:int      # integration on OrbStack — no cloud, no cost
+bun run ui:css        # after changing classes in src/ui/ (index.html, app.js): regenerates the dashboard's style.css (committed; a unit test checks it)
 FORNAX_E2E_UBUNTU=26.04 bun test test/integration/e2e.test.ts --timeout 1800000   # same flow on 26.04 (machine fornax-base-2604)
 ```
 

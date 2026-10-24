@@ -25,6 +25,10 @@ export class FornaxError extends Error {
   }
 }
 
-export const fail = (code: string, message: string, hint?: string, next?: string, details?: unknown): never => {
+/** Anything thrown, as the error the user sees: an unexpected one is a bug in fornax. */
+export const asFornaxError = (e: unknown): FornaxError =>
+  e instanceof FornaxError ? e : new FornaxError("internal_error", (e as Error)?.message ?? String(e), "this is a bug in fornax", undefined, { stack: (e as Error)?.stack });
+
+export const fail =(code: string, message: string, hint?: string, next?: string, details?: unknown): never => {
   throw new FornaxError(code, message, hint, next, details);
 };

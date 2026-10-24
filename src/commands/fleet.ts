@@ -87,7 +87,7 @@ defineCommand({
   examples: ["fornax agent-context", "fornax agent-context --json"],
   async run(_input, ctx) {
     const cmds = commands()
-      .filter((c) => !c.internal)
+      .filter((c) => !c.internal && !c.humanOnly)
       .map(describeCommand);
     let fleet: unknown = null;
     const dir = ctx.fleetDir ?? findFleetDir(ctx.cwd);

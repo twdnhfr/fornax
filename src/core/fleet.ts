@@ -4,6 +4,7 @@ import YAML from "yaml";
 import type { z } from "zod";
 import { CONFIG_VERSION, upgradesFrom } from "./config-version.ts";
 import { FornaxError, fail } from "./errors.ts";
+import { notice } from "./notice.ts";
 import { FleetSchema, ServerSchema, type FleetConfig, type Server, type Site } from "./schema.ts";
 import { resolveSecret } from "./secrets.ts";
 import { onePasswordFor, opFor } from "./onepassword.ts";
@@ -48,7 +49,7 @@ function migrateLegacyFleet(dir: string, file: string) {
   }
   if (file.endsWith(LEGACY_FLEET_FILE) && !warnedLegacy) {
     warnedLegacy = true;
-    process.stderr.write(`note: ${file} is the old name — rename it to ${FLEET_FILE} (git mv ${LEGACY_FLEET_FILE} ${FLEET_FILE})\n`);
+    notice(`note: ${file} is the old name — rename it to ${FLEET_FILE} (git mv ${LEGACY_FLEET_FILE} ${FLEET_FILE})`);
   }
 }
 let warnedLegacy = false;
@@ -153,7 +154,7 @@ export function loadFleet(opts: { cwd: string; fleetDir?: string }): Fleet {
   const version = configVersion(readDoc(file!), file!);
   if (version < CONFIG_VERSION && !warnedVersion) {
     warnedVersion = true;
-    process.stderr.write(`note: this fleet config is version ${version}, fornax uses ${CONFIG_VERSION} — read as upgraded; \`fornax fleet upgrade\` writes it\n`);
+    notice(`note: this fleet config is version ${version}, fornax uses ${CONFIG_VERSION} — read as upgraded; \`fornax fleet upgrade\` writes it`);
   }
   const config = parseYaml(FleetSchema, file!, { version, kind: "fleet" });
   const servers = new Map<string, Server>();

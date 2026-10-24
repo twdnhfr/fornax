@@ -66,6 +66,8 @@ Without `--json` it goes to stderr as `error [<code>]: <message>`, followed by `
 | `not_github` | `git connect` works with GitHub only; elsewhere add the key and the webhook by hand |
 | `no_env`, `no_local_env`, `no_key`, `no_history`, `no_logs`, `no_public_ip` | something the command reads does not exist (yet) |
 | `no_terminal` | `fornax shell` needs a terminal |
+| `not_in_ui` | `fornax ui` was asked for a command or option the dashboard does not offer (destroy-tier commands, `apply --confirm`, `shell`, `run` …) |
+| `port_in_use`, `invalid_request` | `fornax ui` cannot listen on the given port; a dashboard request was not JSON |
 | `secret_unavailable`, `invalid_secret_ref` | a secret reference cannot be read, or is not one |
 | `onepassword_failed`, `onepassword_busy` | the 1Password CLI failed, or another fornax has held it for minutes |
 | `secrets_sync_failed` | the apply happened; copying its secrets to 1Password did not |
@@ -125,7 +127,7 @@ Every command has a tier (`tier:` in its help, `tier` in `agent-context --json`)
 
 | Tier | Commands |
 | --- | --- |
-| `read` | `agent-context`, `server list`, `site list`, `server status`, `ssl status`, `logs`, `explain`, `tailnet status`, `health`, `secrets list`, `plan`, `diff`, `releases`, `git key`, `env pull`, `env diff`, `provider list`, `provider catalog`, `dns status`, `backup status`, `backup list`, `backup key`, `site check`, `history`, `fleet copies` |
+| `read` | `agent-context`, `server list`, `site list`, `server status`, `ssl status`, `logs`, `explain`, `tailnet status`, `health`, `secrets list`, `plan`, `diff`, `releases`, `git key`, `env pull`, `env diff`, `provider list`, `provider catalog`, `dns status`, `backup status`, `backup list`, `backup key`, `site check`, `history`, `fleet copies`, `ui` |
 | `write` | `init`, `fleet upgrade`, `server add`, `site add`, `site alias`, `tailnet sync`, `secrets setup`, `secrets sync`, `apply`, `server bootstrap`, `server provision`, `notify test`, `deploy`, `rollback`, `git connect`, `env push`, `server create`, `server rename`, `server snapshot`, `server rdns`, `dns sync`, `import forge`, `detach forge`, `backup run`, `backup restore`, `site convert`, `shell`, `run`, `fleet push`, `fleet restore` |
 | `destroy` | `site remove`, `server destroy`, `server reinstall` |
 

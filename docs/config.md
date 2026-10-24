@@ -699,7 +699,21 @@ string · optional
 
 ### `sites.<domain>.preset`
 
-one of `"laravel"`, `"php"`, `"static"` · default `"laravel"`
+one of `"laravel"`, `"php"`, `"static"`, `"node"` · default `"laravel"`
+
+### `sites.<domain>.node`
+
+object · optional
+
+preset node: the app's own server, behind nginx. `start` runs in the release as the site user, with PORT, HOST and HOSTNAME (127.0.0.1) set — e.g. "bun run start" or "node .next/standalone/server.js". A deploy starts the new release on the other of two ports (`port` and port+1; default: derived from the domain, 20000–27999) and switches nginx once it answers.
+
+### `sites.<domain>.node.start`
+
+string (a plain command: letters, digits, spaces and . / = : @ + , - _ only; a command) · required
+
+### `sites.<domain>.node.port`
+
+whole number from 1024 to 65534 · optional
 
 ### `sites.<domain>.web_dir`
 
@@ -836,6 +850,8 @@ Names that only send visitors on to the site's domain (301, path kept) — e.g. 
 ### `sites.<domain>.health_check`
 
 string (a URL path such as /up) · optional
+
+Path a new release must answer (2xx/3xx) before and after it goes live; preset node checks "/" without it.
 
 ### `sites.<domain>.deploy`
 

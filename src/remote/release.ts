@@ -2,13 +2,14 @@
  * `fornax release <site>` — runs ON the server (as root, via fornax-deploy@<site>.service).
  * Clones into releases/<ts>, links shared paths, builds, switches `current` atomically,
  * reloads, health-checks (rolling back on failure), prunes old releases and reports.
+ * Node apps switch between two slots instead (switchNode): the new release runs next to the old one.
  * In-place sites (taken over from Forge without zero-downtime) are their own checkout:
  * fetch, reset to the commit, build in place; a rollback rebuilds an older commit.
  */
-import { appendFileSync, chownSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chownSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHmac } from "node:crypto";
 import { join } from "node:path";
-import { DEPLOY_KEY, DEPLOY_LOG_DIR, KNOWN_HOSTS, REQUEST_DIR, RUNTIME_DIR, SITE_LOG_DIR, type SiteRuntime } from "../core/runtime.ts";
+import { DEPLOY_KEY, DEPLOY_LOG_DIR, KNOWN_HOSTS, nodeUpstreamConf, REQUEST_DIR, RUNTIME_DIR, SITE_LOG_DIR, type SiteRuntime } from "../core/runtime.ts";
 import { RETENTION } from "../core/plan.ts";
 
 export interface ReleaseResult {
@@ -41,8 +42,42 @@ function ids(user: string): { uid: number; gid: number } {
   return { uid: Number(r.stdout.toString().trim()), gid: Number(g.stdout.toString().trim()) };
 }
 
-export async function release(domain: string, o: { rollback?: boolean; to?: string } = {}): Promise<ReleaseResult> {
+export async function release(domain: string, o: { rollback?: boolean; to?: string; restart?: boolean } = {}): Promise<ReleaseResult> {
   const rt = loadRuntime(domain);
+  const unlock = await lock(domain);
+  try {
+    return await releaseLocked(domain, rt, o);
+  } finally {
+    unlock();
+  }
+}
+
+/**
+ * One run per site at a time: a deploy, a rollback and a restart (after `apply` changed a node
+ * app's units) would otherwise move `current` and the slots under each other. The later one waits.
+ */
+async function lock(domain: string): Promise<() => void> {
+  const dir = "/run/fornax-release";
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const path = join(dir, `${domain}.lock`);
+  for (let waited = 0; waited < 1800; waited++) {
+    try {
+      writeFileSync(path, String(process.pid), { flag: "wx" });
+      return () => rmSync(path, { force: true });
+    } catch {
+      const pid = Number(readSafe(path));
+      // left behind by a run that died
+      if (!pid || !existsSync(`/proc/${pid}`)) rmSync(path, { force: true });
+      else {
+        if (waited === 0) process.stdout.write(`=> waiting for the run of ${domain} in progress (pid ${pid})\n`);
+        await Bun.sleep(1000);
+      }
+    }
+  }
+  throw new StepError(`another deploy of ${domain} has been running for 30 minutes`);
+}
+
+async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: boolean; to?: string; restart?: boolean }): Promise<ReleaseResult> {
   const started = new Date();
   const ts = stamp();
   const { uid, gid } = ids(rt.user);
@@ -54,15 +89,16 @@ export async function release(domain: string, o: { rollback?: boolean; to?: stri
   }
   const logDir = DEPLOY_LOG_DIR(rt.user);
   mkdirSync(logDir, { recursive: true, mode: 0o750 });
-  const logPath = join(logDir, `${ts}${o.rollback ? "-rollback" : ""}.log`);
+  const logPath = join(logDir, `${ts}${o.rollback ? "-rollback" : o.restart ? "-restart" : ""}.log`);
   writeFileSync(logPath, "");
   const log = (line: string) => {
     appendFileSync(logPath, line + "\n");
     process.stdout.write(line + "\n");
   };
 
-  const request = readRequest(domain);
-  const source = o.rollback ? "rollback" : (request?.source ?? "cli");
+  // a restart leaves a push that is waiting to be deployed alone
+  const request = o.restart ? null : readRequest(domain);
+  const source = o.rollback ? "rollback" : o.restart ? "restart" : (request?.source ?? "cli");
   const releases = join(rt.root, "releases");
   const current = join(rt.root, "current");
   const previous = existsSync(current) ? readlinkSync(current) : null;
@@ -102,7 +138,7 @@ export async function release(domain: string, o: { rollback?: boolean; to?: stri
   };
 
   const reload = () => {
-    if (rt.preset !== "static") run(`systemctl reload php${rt.php}-fpm`, { asRoot: true, allowFail: true });
+    if (rt.preset !== "static" && rt.preset !== "node") run(`systemctl reload php${rt.php}-fpm`, { asRoot: true, allowFail: true });
     const live = rt.mode === "in_place" ? rt.root : current;
     if (rt.preset === "laravel" && existsSync(join(live, "artisan"))) run(`php${rt.php} artisan queue:restart`, { cwd: live, allowFail: true });
     for (const p of rt.programs.filter((p) => /^[\w.-]+$/.test(p))) run(`supervisorctl restart '${p}:*'`, { asRoot: true, allowFail: true });
@@ -110,6 +146,73 @@ export async function release(domain: string, o: { rollback?: boolean; to?: stri
 
   const activate = (target: string) => {
     run(`ln -sfn '${target}' '${current}.fornax-tmp' && mv -Tf '${current}.fornax-tmp' '${current}'`);
+  };
+
+  /**
+   * Blue/green for node apps: `dir` starts in the idle slot, next to the live one, and must answer
+   * on its own port; then nginx is switched to it (validated reload), and the old slot stops once
+   * nginx's old workers have finished their requests. Before the switch, a failure stops the new
+   * slot and throws — the live one never noticed. After it, a failed check through nginx switches
+   * back ("rolled_back").
+   */
+  const switchNode = async (dir: string): Promise<"ok" | "rolled_back"> => {
+    const n = rt.node!;
+    const conf = readSafe(n.upstream.file);
+    const pointed = n.slots.find((x) => conf?.includes(`server 127.0.0.1:${x.port};`));
+    // the new release goes to the slot nginx does not point at; the other one serves, if it runs
+    const next = n.slots.find((x) => x !== (pointed ?? n.slots[1]))!;
+    const other = n.slots.find((x) => x !== next)!;
+    const live = Bun.spawnSync(["systemctl", "is-active", "-q", other.unit]).exitCode === 0 && pointed === other ? other : undefined;
+    const unit = (verb: string, x: { unit: string }) => run(`systemctl ${verb} '${x.unit}'`, { asRoot: true, allowFail: verb.includes("disable") });
+    log(`=> starting ${dir.split("/").pop()} in slot ${next.name} (port ${next.port})${live ? `; slot ${live.name} (port ${live.port}) keeps serving` : ""}`);
+    run(`ln -sfn '${dir}' '${next.link}.fornax-tmp' && mv -Tf '${next.link}.fornax-tmp' '${next.link}'`);
+    const appLog = join(SITE_LOG_DIR(rt.user), "app.log");
+    const logFrom = existsSync(appLog) ? statSync(appLog).size : 0;
+    unit("restart", next);
+    if (!(await nodeCheck(rt, next, log, { path: appLog, from: logFrom }))) {
+      unit("disable --now", next);
+      throw new StepError(`the new release did not answer on port ${next.port} — ${live ? `slot ${live.name} keeps serving` : "nothing was serving before"}`);
+    }
+    // nginx is the only way in that knows the site's basic auth and IP rules
+    const open = Bun.spawnSync(["ss", "-ltnH", `sport = :${next.port}`]).stdout.toString().split("\n").map((l) => l.trim().split(/\s+/)[3] ?? "").filter((a) => a && !/^(127\.0\.0\.1|\[::1\]):/.test(a));
+    if (open.length) log(`   warning: the app listens on ${open.join(", ")}, not only on 127.0.0.1 — start it bound to 127.0.0.1 (e.g. next start -H 127.0.0.1)`);
+    const point = (x: { port: number; name: string }) => {
+      const before = conf ?? "";
+      writeAtomic(n.upstream.file, nodeUpstreamConf(n.upstream.name, x.port));
+      if (run("nginx -t -q", { asRoot: true, allowFail: true }).code !== 0) {
+        writeAtomic(n.upstream.file, before);
+        throw new StepError(`nginx rejected the switch to slot ${x.name} — nothing changed`);
+      }
+      run("systemctl reload nginx", { asRoot: true });
+      // old workers finish what they started with the old upstream before that slot may stop
+      // ("dow[n]": the pattern must not match this shell's own command line)
+      run("sleep 0.3; for i in $(seq 300); do pgrep -f 'nginx: worker process is shutting dow[n]' >/dev/null || break; sleep 0.1; done", { asRoot: true, allowFail: true });
+    };
+    log(`=> switching nginx to slot ${next.name}`);
+    unit("enable", next);
+    try {
+      point(next);
+    } catch (e) {
+      unit("disable --now", next);
+      throw e;
+    }
+    activate(dir);
+    reload();
+    if (rt.health_check) {
+      log(`=> health check after the switch ${rt.health_check.url}`);
+      if (!(await healthCheck(rt, log))) {
+        if (!live || !previous) throw new StepError("health check failed after the switch and there is no previous release to go back to");
+        log(`=> health check failed — switching back to slot ${live.name}`);
+        point(live);
+        unit("disable --now", next);
+        activate(previous);
+        reload();
+        return "rolled_back";
+      }
+    }
+    if (live) log(`=> stopping slot ${live.name}`);
+    unit("disable --now", other);
+    return "ok";
   };
 
   const build = (dir: string) => {
@@ -123,6 +226,16 @@ export async function release(domain: string, o: { rollback?: boolean; to?: stri
       run(`bash '${custom}'`, { cwd: dir, env });
     } else if (rt.deploy_commands) {
       run(`set -e\n${rt.deploy_commands}`, { cwd: dir, env });
+    } else if (rt.preset === "node") {
+      // the project's own package manager: its lockfile says which
+      const has = (f: string) => existsSync(join(dir, f));
+      if (has("yarn.lock") || has("pnpm-lock.yaml")) throw new StepError("yarn and pnpm projects need their build in deploy.commands (or .fornax/deploy.sh)");
+      const pm = has("bun.lock") || has("bun.lockb") || (!has("package-lock.json") && existsSync("/usr/local/bin/bun")) ? "bun" : "npm";
+      if (pm === "bun" && !existsSync("/usr/local/bin/bun")) throw new StepError("the project uses bun (bun.lock), but bun is not on the server — add bun to the server's tools");
+      const pkg = join(dir, "package.json");
+      const scripts = existsSync(pkg) ? ((JSON.parse(readFileSync(pkg, "utf8")) as { scripts?: Record<string, string> }).scripts ?? {}) : {};
+      if (existsSync(pkg)) run(pm === "bun" ? "bun install --frozen-lockfile" : has("package-lock.json") ? "npm ci" : "npm install", { cwd: dir, env });
+      if (scripts.build) run(`${pm} run build`, { cwd: dir, env });
     } else {
       const php = `php${rt.php}`;
       const laravel = rt.preset === "laravel";
@@ -149,14 +262,33 @@ export async function release(domain: string, o: { rollback?: boolean; to?: stri
 
   try {
     if (rt.mode === "in_place") return await inPlace();
+    if (o.restart) {
+      if (!rt.node) throw new StepError("--restart is for node apps");
+      if (!previous) {
+        log("=> nothing deployed yet — nothing to restart");
+        result.status = "success";
+        return finish();
+      }
+      log(`=> restarting ${domain} without downtime: ${previous.split("/").pop()} in the other slot`);
+      result.release = previous.split("/").pop() ?? null;
+      result.sha = shaOf(who, previous);
+      if ((await switchNode(previous)) !== "ok") throw new StepError("the restarted app failed its health check after the switch — the running one serves again");
+      result.status = "success";
+      return finish();
+    }
     if (o.rollback) {
       const all = listReleases(releases);
       const cur = previous ? previous.split("/").pop() : undefined;
       const target = o.to ?? all.filter((r) => r < (cur ?? "~")).pop();
       if (!target || !all.includes(target)) throw new StepError(`no release to roll back to (current: ${cur ?? "none"}, available: ${all.join(", ") || "none"})`);
       log(`=> rolling back ${domain}: ${cur} → ${target}`);
-      activate(join(releases, target));
-      reload();
+      if (rt.node) {
+        // like a deploy without the build: the old release must answer before it serves again
+        if ((await switchNode(join(releases, target))) !== "ok") throw new StepError(`release ${target} failed its health check after the switch — ${cur} serves again`);
+      } else {
+        activate(join(releases, target));
+        reload();
+      }
       result.status = "rolled_back";
       result.release = target;
       result.sha = shaOf(who, join(releases, target));
@@ -188,6 +320,20 @@ export async function release(domain: string, o: { rollback?: boolean; to?: stri
     }
 
     build(dir);
+
+    if (rt.node) {
+      if ((await switchNode(dir)) === "ok") {
+        prune(who, releases, rt.keep_releases, ts, log);
+        result.status = "success";
+      } else {
+        result.status = "rolled_back";
+        result.error = "health check failed after the switch";
+        removeTree(who, dir);
+        result.release = previous?.split("/").pop() ?? null;
+        result.sha = previous ? shaOf(who, previous) : null;
+      }
+      return finish();
+    }
 
     // Health check BEFORE switching: nginx serves releases/next on a local socket. A broken
     // release never goes live; the check after activation below stays as a second net.
@@ -231,7 +377,7 @@ export async function release(domain: string, o: { rollback?: boolean; to?: stri
     result.error = (e as Error).message;
     log(`=> FAILED: ${result.error}`);
     // a failed build never becomes current; drop it so it cannot be rolled back to
-    if (result.release && !o.rollback && readlinkSafe(current) !== join(releases, result.release)) {
+    if (result.release && !o.rollback && !o.restart && readlinkSafe(current) !== join(releases, result.release)) {
       removeTree(who, join(releases, result.release));
     }
     return finish();
@@ -331,6 +477,70 @@ function previousDeployed(logDir: string, current: string): string | null {
   const brought = runs.find((r) => r.status === "success" && r.sha === current);
   if (brought?.previous && /^[0-9a-f]{40}$/.test(brought.previous) && brought.previous !== current) return brought.previous;
   return runs.find((r) => r.status === "success" && r.sha && r.sha !== current)?.sha ?? null;
+}
+
+const readSafe = (p: string) => {
+  try {
+    return readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
+};
+
+/** At most the last 64 KiB of what a file got after offset `from`. */
+function readFrom(path: string, from: number): string {
+  try {
+    const fd = openSync(path, "r");
+    try {
+      const size = fstatSync(fd).size;
+      const start = Math.max(from, size - 65536);
+      const buf = Buffer.alloc(Math.max(0, size - start));
+      readSync(fd, buf, 0, buf.length, start);
+      return buf.toString("utf8");
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return "";
+  }
+}
+
+/** Root's own files only (the upstream of a node app, outside any home). */
+function writeAtomic(path: string, content: string) {
+  writeFileSync(`${path}.fornax-tmp`, content, { mode: 0o644 });
+  renameSync(`${path}.fornax-tmp`, path);
+}
+
+/**
+ * A node release in its slot, before nginx sends it anything: it must answer on its own port within
+ * a minute (frameworks take a few seconds to boot). A process that exits gives up at once.
+ */
+async function nodeCheck(rt: SiteRuntime, slot: NonNullable<SiteRuntime["node"]>["slots"][number], log: (l: string) => void, appLog: { path: string; from: number }): Promise<boolean> {
+  const hc = rt.health_check;
+  const path = hc ? new URL(hc.url).pathname + new URL(hc.url).search : "/";
+  const restarts = () => Number(Bun.spawnSync(["systemctl", "show", "-p", "NRestarts", "--value", slot.unit]).stdout.toString().trim()) || 0;
+  const before = restarts();
+  log(`=> health check before the switch: http://127.0.0.1:${slot.port}${path}`);
+  let last = "";
+  const t0 = Date.now();
+  for (let i = 1; i <= 60; i++) {
+    const p = Bun.spawnSync(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", "-H", `Host: ${rt.domain}`, "-H", `X-Forwarded-Proto: ${hc?.https ? "https" : "http"}`, `http://127.0.0.1:${slot.port}${path}`]);
+    const code = Number(p.stdout.toString().trim());
+    const seen = `HTTP ${code || "no answer"}`;
+    if (seen !== last) log(`   after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${seen}`);
+    last = seen;
+    if (code >= 200 && code < 400) return true;
+    const state = Bun.spawnSync(["systemctl", "is-active", slot.unit]).stdout.toString().trim();
+    if (restarts() > before || state === "failed") {
+      // what it wrote since it was started (both slots share the log; the live one is usually quiet)
+      const out = readFrom(appLog.path, appLog.from).trimEnd().split("\n").slice(-20).join("\n");
+      log(`   the process exited (${state})${out ? ":" : ""}`);
+      if (out) log(out.replace(/^/gm, "   | "));
+      return false;
+    }
+    await Bun.sleep(1000);
+  }
+  return false;
 }
 
 const readlinkSafe = (p: string) => {
@@ -434,7 +644,7 @@ async function healthCheck(rt: SiteRuntime, log: (l: string) => void): Promise<b
 export async function notify(rt: SiteRuntime, r: ReleaseResult, log: (l: string) => void) {
   const ntfy = rt.notify.ntfy;
   if (ntfy && (rt.notify.on === "always" || r.status !== "success")) {
-    const what = r.status === "success" ? "deployed" : r.status === "rolled_back" ? (r.source === "rollback" ? "rolled back" : "deploy failed, rolled back") : "deploy FAILED";
+    const what = r.status === "success" ? (r.source === "restart" ? "restarted" : "deployed") : r.source === "restart" ? "restart FAILED" : r.status === "rolled_back" ? (r.source === "rollback" ? "rolled back" : "deploy failed, rolled back") : "deploy FAILED";
     const host = Bun.spawnSync(["hostname"]).stdout.toString().trim();
     const token = ntfy.token_file && existsSync(ntfy.token_file) ? readFileSync(ntfy.token_file, "utf8").trim() : "";
     const send = (email?: string) =>

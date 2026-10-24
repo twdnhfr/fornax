@@ -4,7 +4,7 @@ import { fail } from "../core/errors.ts";
 import { siteRedis, type ResolvedSite } from "../core/fleet.ts";
 import { absent, check, dir, file, packages, service, symlink, type Resource } from "../core/resource.ts";
 import type { Daemon, Site } from "../core/schema.ts";
-import { DEPLOY_LOG_DIR, SITE_LOG_DIR } from "../core/runtime.ts";
+import { DEPLOY_LOG_DIR, NODE_UPSTREAM_DIR, nodeSlots, nodeUpstreamConf, SITE_LOG_DIR, type NodeRuntime } from "../core/runtime.ts";
 import { asUser, q, sha256 } from "../core/shell.ts";
 import { configFiles, HEADER, prune, SECRETS, type ModuleCtx } from "./common.ts";
 import { nginxSupport } from "./server.ts";
@@ -92,6 +92,88 @@ function proxyServer(p: Proxy, tls: { cert: string; key: string } | undefined): 
   ];
 }
 
+/** A node app gets every request; websockets pass, other requests reuse kept-alive upstream connections. */
+function nodeLocation(upstream: string): string[] {
+  return [
+    "    location / {",
+    `        proxy_pass http://${upstream};`,
+    "        proxy_http_version 1.1;",
+    "        proxy_set_header Host $host;",
+    "        proxy_set_header X-Real-IP $remote_addr;",
+    "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+    "        proxy_set_header X-Forwarded-Proto $scheme;",
+    "        proxy_set_header X-Forwarded-Host $host;",
+    "        proxy_set_header Upgrade $http_upgrade;",
+    "        proxy_set_header Connection $fornax_connection;",
+    // as for PHP: framework responses carry large headers (cookies, RSC); nginx's 4k default answers 502
+    "        proxy_buffer_size 64k;",
+    "        proxy_buffers 32 32k;",
+    "    }",
+  ];
+}
+
+/** http level, once per server with node apps: "Connection: upgrade" only for websocket requests. */
+export const NODE_MAP_PATH = "/etc/nginx/conf.d/fornax-node.conf";
+export const NODE_MAP = `${H}map $http_upgrade $fornax_connection {
+    default upgrade;
+    ''      '';
+}
+`;
+
+/**
+ * One slot of a node app: the site user runs `node.start` in the release the slot link points at.
+ * systemd rather than supervisor: which slot is enabled is the record of which one serves, and it
+ * survives a reboot without a config rewrite per deploy.
+ */
+export function nodeUnitConf(s: ResolvedSite, slot: NodeRuntime["slots"][number]): string {
+  const u = s.user;
+  return `${H}[Unit]
+Description=node app of ${s.domain}, slot ${slot.name} (fornax)
+After=network.target
+
+[Service]
+User=${u}
+Group=${u}
+WorkingDirectory=${slot.link}
+Environment=NODE_ENV=production PORT=${slot.port} HOST=127.0.0.1 HOSTNAME=127.0.0.1 HOME=/home/${u} USER=${u} PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash -c "exec ${s.node!.start}"
+Restart=always
+RestartSec=2
+TimeoutStopSec=30
+StandardOutput=append:${SITE_LOG_DIR(u)}/app.log
+StandardError=inherit
+UMask=0027
+NoNewPrivileges=yes
+ProtectSystem=full
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+`;
+}
+
+/** The handler of a site's node units: the app restarts with its new unit (start command, port) — see handlerFor. */
+export const nodeHandler = (s: ResolvedSite) => `fornax-node@${s.domain}`;
+
+function nodeResources(s: ResolvedSite, o: { owner: string }): Resource[] {
+  const n = nodeSlots(s, s.node!.ports);
+  const [a, b] = n.slots as [NodeRuntime["slots"][number], NodeRuntime["slots"][number]];
+  // which slot serves is the deploys' business: apply only makes sure the upstream names the
+  // enabled one (slot a before the first deploy) — after a port change, too
+  const port = `port=${a.port}; systemctl is-enabled -q ${q(b.unit)} 2>/dev/null && port=${b.port}`;
+  return [
+    ...n.slots.map((slot) => file(`/etc/systemd/system/${slot.unit}`, nodeUnitConf(s, slot), { ...o, handler: nodeHandler(s) })),
+    file(NODE_MAP_PATH, NODE_MAP, { owner: "web", handler: "nginx" }),
+    check(
+      `node-upstream:${s.domain}`,
+      `nginx upstream ${n.upstream.file} → the enabled slot of ${s.domain}`,
+      `${port}; grep -qx ${q(`upstream ${n.upstream.name} {`)} ${q(n.upstream.file)} && grep -qx "    server 127.0.0.1:$port;" ${q(n.upstream.file)}`,
+      `${port}; install -d -m 0755 ${NODE_UPSTREAM_DIR}; printf %s ${q(nodeUpstreamConf(n.upstream.name, "@PORT@"))} | sed "s/@PORT@/$port/" > ${q(n.upstream.file)}`,
+      { ...o, handler: "nginx" },
+    ),
+  ];
+}
+
 /** The path GitHub posts pushes to, on the site's own domain: no webhook hostname per server needed. */
 export const HOOK_PATH = "/.well-known/fornax-hook";
 
@@ -105,7 +187,8 @@ export function vhostConf(s: ResolvedSite, hookPort?: number): string {
   const www = s.spec.www_redirect ? `www.${s.domain}` : undefined;
   // names that only send visitors on to the domain: www and the site's redirects
   const away = [...(www ? [www] : []), ...s.spec.redirects];
-  const php = s.spec.preset !== "static";
+  const node = s.node ? nodeSlots(s, s.node.ports) : undefined;
+  const php = s.spec.preset !== "static" && !node;
   const nextRoot = s.webRoot.replace(`${s.root}/current`, `${s.root}/next`);
   // push-to-deploy: GitHub's webhook for this site; fornax-hook checks the signature (HMAC per site),
   // so no basic auth or IP rule of the site applies here
@@ -122,14 +205,18 @@ export function vhostConf(s: ResolvedSite, hookPort?: number): string {
       ]
     : [];
   const body = (root: string, logs: boolean) => [
-    `    root ${root};`,
-    "    index index.html index.htm" + (php ? " index.php;" : ";"),
-    "    charset utf-8;",
+    ...(node
+      ? []
+      : [
+          `    root ${root};`,
+          "    index index.html index.htm" + (php ? " index.php;" : ";"),
+          "    charset utf-8;",
+        ]),
     // also here, not only in fornax's nginx.conf: adopted servers keep their own nginx.conf
     "    server_tokens off;",
     // nginx may read every site: a symlink one site plants towards another's files is not followed
     // (current → releases/…, public/storage → storage/app/public belong to the site and still work)
-    "    disable_symlinks if_not_owner;",
+    ...(node ? [] : ["    disable_symlinks if_not_owner;"]),
     ...(logs ? [`    access_log /var/log/nginx/${s.domain}-access.log fornax;`, `    error_log /var/log/nginx/${s.domain}-error.log error;`] : ["    access_log off;"]),
     ...(s.spec.nginx.client_max_body_size ? [`    client_max_body_size ${s.spec.nginx.client_max_body_size};`] : []),
     '    add_header X-Frame-Options "SAMEORIGIN" always;',
@@ -137,10 +224,14 @@ export function vhostConf(s: ResolvedSite, hookPort?: number): string {
     "",
     ...snippetIncludes(s, s.spec.nginx.server, "").map((l) => `    ${l}`),
     ...(logs ? hook : []),
-    php ? "    location / {\n        try_files $uri $uri/ /index.php?$query_string;\n    }" : "    location / {\n        try_files $uri $uri/ $uri.html =404;\n    }",
-    "    location = /favicon.ico { access_log off; log_not_found off; }",
-    "    location = /robots.txt  { access_log off; log_not_found off; }",
-    ...(php
+    ...(node
+      ? nodeLocation(node.upstream.name)
+      : [
+          php ? "    location / {\n        try_files $uri $uri/ /index.php?$query_string;\n    }" : "    location / {\n        try_files $uri $uri/ $uri.html =404;\n    }",
+          "    location = /favicon.ico { access_log off; log_not_found off; }",
+          "    location = /robots.txt  { access_log off; log_not_found off; }",
+        ]),
+    ...(node ? [] : php
       ? [
           "    error_page 404 /index.php;",
           "    location ~ \\.php$ {",
@@ -161,6 +252,8 @@ export function vhostConf(s: ResolvedSite, hookPort?: number): string {
   ];
   const out = [H.trimEnd()];
   out.push(...snippetIncludes(s, s.spec.nginx.http, "http-"));
+  // the upstream names the slot that serves; deploys rewrite that file, never this one
+  if (node) out.push(`include ${node.upstream.file};`);
   if (tls) {
     out.push(
       "server {",
@@ -198,8 +291,9 @@ export function vhostConf(s: ResolvedSite, hookPort?: number): string {
     out.push("server {", "    listen 80;", "    listen [::]:80;", `    server_name ${names.join(" ")};`, "    include /etc/nginx/fornax/acme.conf;", "", ...body(s.webRoot, true), "}");
   }
   for (const p of s.spec.proxies) out.push(...proxyServer(p, tls && (s.tlsIssuer === "existing" && p.cert && p.key ? { cert: p.cert, key: p.key } : tls)));
-  // The next release, reachable only from the server itself: `fornax release` health-checks it here before switching.
-  if (!s.inPlace) out.push("server {", `    listen unix:${previewSocket(s)};`, `    server_name ${s.domain};`, ...body(nextRoot, false), "}");
+  // The next release, reachable only from the server itself: `fornax release` health-checks it here
+  // before switching (a node release is checked on its own port instead).
+  if (!s.inPlace && !node) out.push("server {", `    listen unix:${previewSocket(s)};`, `    server_name ${s.domain};`, ...body(nextRoot, false), "}");
   return out.join("\n") + "\n";
 }
 
@@ -487,8 +581,10 @@ if [ "$(id -u ${q(u)})" -lt 1000 ]; then echo "${u} is a system account — refu
         : file(path, auth.value, { ...o, mode: "0600", user: `${s.user}:${s.user}` }),
     );
   }
-  if (g.pool && s.spec.preset !== "static") r.push(file(poolPath(s), poolConf(ctx, s), { ...o, handler: `php${s.php}-fpm` }));
+  if (g.pool && s.spec.preset !== "static" && !s.node) r.push(file(poolPath(s), poolConf(ctx, s), { ...o, handler: `php${s.php}-fpm` }));
   r.push(...tlsResources(ctx, s, o));
+  // before the vhost: it includes the upstream file
+  if (s.node) r.push(...nodeResources(s, o));
 
   if (g.vhost) {
     // nginx snippets from the fleet repo
@@ -539,8 +635,24 @@ if [ "$(id -u ${q(u)})" -lt 1000 ]; then echo "${u} is a system account — refu
 
 function removeSite(ctx: ModuleCtx, s: ResolvedSite): Resource[] {
   const o = { owner: `site:${s.domain}` };
+  const units = s.node ? nodeSlots(s, s.node.ports) : undefined;
   const r: Resource[] = [
     absent(`/etc/nginx/sites-enabled/${s.domain}`, { ...o, handler: "nginx" }),
+    // once nginx no longer sends anything to it (flushBefore: the vhost is gone)
+    ...(units
+      ? [
+          {
+            ...check(
+              `node-off:${s.domain}`,
+              `stop and remove the node app of ${s.domain}`,
+              units.slots.map((x) => `[ ! -e /etc/systemd/system/${x.unit} ]`).join(" && "),
+              `systemctl disable --now ${units.slots.map((x) => x.unit).join(" ")} 2>/dev/null || true; rm -f ${units.slots.map((x) => `/etc/systemd/system/${x.unit}`).join(" ")} ${q(units.upstream.file)}; systemctl daemon-reload`,
+              o,
+            ),
+            flushBefore: true,
+          },
+        ]
+      : []),
     absent(vhostPath(s), { ...o, handler: "nginx" }),
     absent(snippetDir(s), { ...o, handler: "nginx", recursive: true }),
     absent(poolPath(s), { ...o, handler: `php${s.php}-fpm` }),

@@ -22,9 +22,13 @@ defineCommand({
   tier: "write",
   internal: true,
   args: [{ name: "site", help: "site domain", required: true }],
-  options: { rollback: { type: "boolean", help: "switch back to the previous release" }, to: { type: "string", help: "with --rollback: release id" } },
+  options: {
+    rollback: { type: "boolean", help: "switch back to the previous release" },
+    to: { type: "string", help: "with --rollback: release id" },
+    restart: { type: "boolean", help: "node apps: start the current release in the other slot and switch to it (after a changed unit)" },
+  },
   async run(input) {
-    const r = await release(String(input.site), { rollback: Boolean(input.rollback), to: input.to as string | undefined });
+    const r = await release(String(input.site), { rollback: Boolean(input.rollback), to: input.to as string | undefined, restart: Boolean(input.restart) });
     return { data: r, human: "", exitCode: r.status === "success" || (input.rollback && r.status === "rolled_back") ? 0 : 1 };
   },
 });
@@ -395,6 +399,11 @@ chmod 0640 ${q(env)}.fornax-new; mv -f ${q(env)}.fornax-new ${q(env)}`;
 ${asUser(site.user, write)}
 ${refresh}`);
     mkdirSync(join(fleet.dir, ".fornax"), { recursive: true });
-    return { data: { site: site.domain, ...d }, human: `pushed .env to ${site.domain} (+${d.added.length} ~${d.changed.length} -${d.removed.length} keys), previous copy kept next to it` };
+    // a node app reads .env when it starts (and its build may bake values in): a deploy switches without downtime
+    const next = site.node ? `fornax deploy ${site.domain}` : null;
+    return {
+      data: { site: site.domain, ...d, next },
+      human: `pushed .env to ${site.domain} (+${d.added.length} ~${d.changed.length} -${d.removed.length} keys), previous copy kept next to it${next ? `\nthe app reads it when it starts: ${next}` : ""}`,
+    };
   },
 });

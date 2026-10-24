@@ -86,14 +86,14 @@ ${location}
 /**
  * The probe of the server's fornax: its sha256 — or `sha` itself (in sync) when it is a newer build
  * than this one (`build`), so that an apply from an older fornax never downgrades it. Build stamps
- * are ISO times and compare as strings; a binary without one is older than any stamped build.
+ * are ISO times and compare as strings; a binary without one is older than any stamped build
+ * (the same rule as ensureServerBinary).
  */
 export function binaryProbe(sha: string, build: string | undefined, bin = "/usr/local/bin/fornax"): string {
-  const hash = `sha256sum ${q(bin)} | cut -c1-64`;
-  if (!build) return `[ -x ${q(bin)} ] && ${hash} || echo missing`;
+  const newer = build ? `[ "$b" != ${q(build)} ] && [ "$(printf '%s\\n%s\\n' "$b" ${q(build)} | LC_ALL=C sort | tail -n1)" = "$b" ]` : "true";
   return `if [ -x ${q(bin)} ]; then
   b=$(${q(bin)} --version --json 2>/dev/null | sed -n 's/.*"build":"\\([^"]*\\)".*/\\1/p')
-  if [ -n "$b" ] && [ "$b" != ${q(build)} ] && [ "$(printf '%s\\n%s\\n' "$b" ${q(build)} | LC_ALL=C sort | tail -n1)" = "$b" ]; then echo ${q(sha)}; else ${hash}; fi
+  if [ -n "$b" ] && ${newer}; then echo ${q(sha)}; else sha256sum ${q(bin)} | cut -c1-64; fi
 else echo missing; fi`;
 }
 

@@ -129,7 +129,8 @@ describe("fornax on the server", async () => {
     expect(probe("2026-11-01T10:00:00Z", "2026-11-01T10:00:00Z")).toMatch(/^[0-9a-f]{64}$/);
     expect(probe(null, "2026-11-01T10:00:00Z")).toMatch(/^[0-9a-f]{64}$/);
   });
-  test("an unstamped build of ours compares by checksum only", () => {
-    expect(probe("2026-11-02T10:00:00Z", undefined)).toMatch(/^[0-9a-f]{64}$/);
+  test("an unstamped build of ours never replaces a stamped one", () => {
+    expect(probe("2026-11-02T10:00:00Z", undefined)).toBe("ours-sha");
+    expect(probe(null, undefined)).toMatch(/^[0-9a-f]{64}$/);
   });
 });

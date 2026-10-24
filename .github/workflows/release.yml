@@ -2,9 +2,11 @@ name: Release
 
 # Push a tag v<version> (matching package.json and src/core/version.ts): tests, binaries for
 # macOS and Linux, checksums, the filled-in Homebrew formula — all attached to a GitHub release.
+# Run it by hand ("Run workflow") for a dry run: everything but the release, the result as an artifact.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -20,6 +22,7 @@ jobs:
       - run: bun install --frozen-lockfile
 
       - name: Tag matches the version
+        if: github.ref_type == 'tag'
         run: |
           tag="${GITHUB_REF_NAME#v}"
           pkg=$(bun -e 'console.log(require("./package.json").version)')
@@ -35,9 +38,21 @@ jobs:
           cd dist
           sha256sum fornax-*.tar.gz > SHA256SUMS
           cd ..
-          bash scripts/homebrew.sh "${GITHUB_REF_NAME#v}" "${{ github.repository }}" dist/SHA256SUMS > dist/fornax.rb
+          v=$(bun -e 'console.log(require("./package.json").version)')
+          bash scripts/homebrew.sh "$v" "${{ github.repository }}" dist/SHA256SUMS > dist/fornax.rb
+
+      - name: Dry run result
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fornax-dry-run
+          path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+            dist/fornax.rb
 
       - name: GitHub release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -48,7 +63,7 @@ jobs:
 
       # optional: keep a tap repo (owner/homebrew-fornax) current — needs a token that may push there
       - name: Update the Homebrew tap
-        if: ${{ vars.HOMEBREW_TAP != '' }}
+        if: github.ref_type == 'tag' && vars.HOMEBREW_TAP != ''
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |

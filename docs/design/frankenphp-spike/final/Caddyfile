@@ -1,0 +1,10 @@
+{
+	admin unix//run/caddy/admin.sock
+	# local spike: no public ACME
+	local_certs
+	log default {
+		output stderr
+		level WARN
+	}
+}
+import /etc/caddy/sites/*.caddy

@@ -1,0 +1,7 @@
+sitea.test {
+	tls internal
+	reverse_proxy unix//run/fornax-php/sitea.sock {
+		lb_try_duration 10s
+		lb_try_interval 100ms
+	}
+}

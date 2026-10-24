@@ -1,0 +1,27 @@
+[Unit]
+Requires=fornax-php@%i.socket
+After=fornax-php@%i.socket
+Description=FrankenPHP of site user %i (spike)
+After=network.target
+
+[Service]
+Type=notify
+User=%i
+Group=%i
+Environment=XDG_DATA_HOME=/var/lib/fornax-php/%i XDG_CONFIG_HOME=/var/lib/fornax-php/%i GODEBUG=cgocheck=0
+ExecStartPre=/usr/bin/frankenphp validate --config /etc/fornax/frankenphp/%i.caddyfile
+ExecStart=/usr/bin/frankenphp run --config /etc/fornax/frankenphp/%i.caddyfile
+ExecReload=/usr/bin/frankenphp reload --config /etc/fornax/frankenphp/%i.caddyfile --address unix//var/lib/fornax-php/%i/admin.sock
+StateDirectory=fornax-php/%i
+StateDirectoryMode=0700
+WorkingDirectory=/home/%i
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=30
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

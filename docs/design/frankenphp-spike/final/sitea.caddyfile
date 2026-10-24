@@ -1,0 +1,38 @@
+{
+	admin unix//var/lib/fornax-php/sitea/admin.sock
+	auto_https off
+	persist_config off
+	servers {
+		trusted_proxies_unix
+	}
+	frankenphp {
+		php_ini memory_limit 512M
+	}
+	log default {
+		output stderr
+		level WARN
+	}
+}
+# live site: Octane worker mode
+http:// {
+	bind fd/3
+	root /home/sitea/sitea.test/current/public
+	encode zstd gzip
+	php_server {
+		env APP_BASE_PATH /home/sitea/sitea.test/current
+		env APP_PUBLIC_PATH /home/sitea/sitea.test/current/public
+		env LARAVEL_OCTANE 1
+		env MAX_REQUESTS 500
+		worker {
+			file /home/sitea/sitea.test/frankenphp-worker.php
+			num 4
+			match *
+		}
+	}
+}
+# preview of releases/next for the pre-activation health check: classic mode, root only
+http://sitea.test {
+	bind unix//var/lib/fornax-php/sitea/preview.sock
+	root /home/sitea/sitea.test/next/public
+	php_server
+}

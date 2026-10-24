@@ -1,0 +1,26 @@
+{
+	admin unix//var/lib/fornax-php/siteb/admin.sock
+	auto_https off
+	persist_config off
+	servers {
+		trusted_proxies_unix
+	}
+	frankenphp {
+		num_threads 10
+		php_ini memory_limit 512M
+	}
+	log default {
+		output stderr
+		level WARN
+	}
+}
+# live site: classic mode
+http:// {
+	bind fd/3
+	root /home/siteb/siteb.test/current/public
+	encode zstd gzip
+	php_server {
+		env HTTPS on
+		env REMOTE_ADDR {client_ip}
+	}
+}

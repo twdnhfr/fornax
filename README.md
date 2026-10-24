@@ -158,6 +158,7 @@ For humans who would rather click: the fleet at a glance, server status, health,
 | [Compatibility](docs/compatibility.md) | what stays stable from 1.0: config, commands, JSON, error and exit codes, tiers, server layout |
 | [Security](SECURITY.md) | threat model and known limits |
 | [Development](docs/development.md) | tests, integration setup |
+| [Roadmap](docs/roadmap.md) | what is planned before and after 1.0, and what was decided against |
 
 ## Requirements
 

@@ -1,0 +1,13 @@
+[Unit]
+Description=HTTP socket of site user %i (spike)
+
+[Socket]
+ListenStream=/run/fornax-php/%i.sock
+SocketUser=%i
+SocketGroup=caddy
+SocketMode=0660
+DirectoryMode=0755
+Service=fornax-php@%i.service
+
+[Install]
+WantedBy=sockets.target

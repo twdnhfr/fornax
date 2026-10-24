@@ -1,0 +1,30 @@
+{
+	admin unix//run/fornax-php/sitea/admin.sock
+	auto_https off
+	persist_config off
+	frankenphp {
+		php_ini memory_limit 512M
+		php_ini opcache.memory_consumption 256
+		php_ini opcache.max_accelerated_files 20000
+	}
+	log default {
+		output stderr
+		level WARN
+	}
+}
+http://:8083 {
+	root /home/sitea/sitea.test/current/public
+	encode zstd gzip
+	php_server {
+		index frankenphp-worker.php
+		try_files {path} frankenphp-worker.php
+		env APP_BASE_PATH /home/sitea/sitea.test/current
+		env APP_PUBLIC_PATH /home/sitea/sitea.test/current/public
+		env LARAVEL_OCTANE 1
+		env MAX_REQUESTS 500
+		worker {
+			file /home/sitea/sitea.test/current/public/frankenphp-worker.php
+			num 10
+		}
+	}
+}

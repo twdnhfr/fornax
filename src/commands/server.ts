@@ -1,6 +1,7 @@
 import { defineCommand } from "../core/command.ts";
 import { fail } from "../core/errors.ts";
 import { loadFleet, writeServerFile } from "../core/fleet.ts";
+import { assertServerName } from "../core/names.ts";
 import { MODULES } from "../core/schema.ts";
 
 defineCommand({
@@ -18,8 +19,9 @@ defineCommand({
   },
   examples: ["fornax server add web-1 --host 203.0.113.10", "fornax server add old-forge --host 203.0.113.11 --adopt --php 8.3,8.4"],
   async run(input, ctx) {
-    const fleet = loadFleet(ctx);
     const name = String(input.name);
+    assertServerName(name);
+    const fleet = loadFleet(ctx);
     if (fleet.servers.has(name)) fail("exists", `server "${name}" already exists`, undefined, `fornax explain ${name} --offline`);
     if (!input.host) fail("missing_option", "--host is required", "the IP or hostname fornax connects to with SSH");
     const modules = input.modules ? (input.modules as string[]) : input.adopt ? [] : [...MODULES];

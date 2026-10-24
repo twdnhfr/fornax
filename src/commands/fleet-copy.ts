@@ -12,7 +12,7 @@ defineCommand({
   examples: ["fornax fleet push", "fornax fleet push web-1"],
   async run(input, ctx) {
     const fleet = loadFleet(ctx);
-    if (!fleet.config.fleet_copy) fail("config_invalid", "fleet_copy is not set up in fornax.yaml", "add fleet_copy.recipients (age recipients)");
+    if (!fleet.config.fleet_copy) fail("no_fleet_copy", "fleet_copy is not set up in fornax.yaml", "add fleet_copy.recipients (age recipients)");
     const names = (input.servers as string[]).length ? (input.servers as string[]) : [...fleet.servers.keys()];
     const results: Array<{ server: string; created?: string; error?: string }> = [];
     for (const name of names) {

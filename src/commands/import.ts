@@ -4,6 +4,7 @@ import YAML from "yaml";
 import { defineCommand } from "../core/command.ts";
 import { fail } from "../core/errors.ts";
 import { getServer, loadFleet } from "../core/fleet.ts";
+import { assertServerName } from "../core/names.ts";
 import { ServerSchema } from "../core/schema.ts";
 import { SshRunner } from "../core/ssh.ts";
 import { detachServer } from "../forge/detach.ts";
@@ -30,8 +31,9 @@ defineCommand({
     "fornax import forge web-1 --org my-org --server-id 123456 --refresh   # later, while Forge still runs other sites",
   ],
   async run(input, ctx) {
-    const fleet = loadFleet(ctx);
     const name = String(input.name);
+    assertServerName(name);
+    const fleet = loadFleet(ctx);
     if (!input.serverId) fail("missing_option", "--server-id is required", "the numeric id in the Forge URL or `forge server:list`");
     const target = join(fleet.dir, "servers", `${name}.yaml`);
     const existing = input.refresh ? getServer(fleet, name) : undefined;

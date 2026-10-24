@@ -20,7 +20,7 @@ class Manual implements Provider {
   }
   async get(id: string): Promise<ProviderServer> {
     const s = this.servers.find((x) => String(x.provider.id ?? x.server) === id || x.server === id);
-    if (!s) fail("unknown_server", `no server ${id}`);
+    if (!s) fail("provider_not_found", `no server ${id}`);
     return { id, name: s!.server, status: "unknown", ipv4: s!.public_ipv4 ?? null, ipv6: s!.public_ipv6 ?? null, arch: s!.arch };
   }
   async list() {

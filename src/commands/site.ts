@@ -133,12 +133,12 @@ defineCommand({
   name: "site remove",
   summary: "mark a site absent: removes its vhost, pool, daemons and cron on the next apply (--purge also deletes user, files, database)",
   tier: "destroy",
-  args: [{ name: "domain", help: "site domain", required: true }],
+  args: [{ name: "site", help: "site domain", required: true }],
   options: { purge: { type: "boolean", help: "also delete the Linux user, home directory, database and certificate" } },
   examples: ["fornax site remove old.example.com --confirm=old.example.com", "fornax site remove old.example.com --purge --confirm=old.example.com"],
   async run(input, ctx) {
     const fleet = loadFleet(ctx);
-    const { server, site } = findSite(fleet, String(input.domain));
+    const { server, site } = findSite(fleet, String(input.site));
     if (isProtected(fleet, site.domain)) fail("protected", `${site.domain} is protected by policy`, "remove it from policies.protected in fornax.yaml first");
     requireConfirm(input, site.domain);
     editServerFile(fleet, server.server, (doc) => {

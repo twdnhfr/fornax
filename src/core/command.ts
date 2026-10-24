@@ -98,12 +98,21 @@ export function parseInput(def: CommandDef, argv: string[]): Input {
   const input: Input = { _: [] };
   for (const [k, s] of Object.entries(specs)) if (s.default !== undefined) input[camel(k)] = s.default;
 
+  const variadic = (def.args ?? []).some((a) => a.variadic);
   const positionals: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i]!;
     if (tok === "--") {
       positionals.push(...argv.slice(i + 1));
       break;
+    }
+    if (tok === "-h") {
+      input.help = true;
+      continue;
+    }
+    // short flags do not exist: "-f" would otherwise land as a site or server name
+    if (/^-[^-\d]/.test(tok) && !variadic) {
+      fail("unknown_option", `unknown option ${tok} for "${def.name}"`, "fornax has long options only (-h is the one exception)", `fornax ${def.name} --help`);
     }
     if (!tok.startsWith("--")) {
       positionals.push(tok);
@@ -120,7 +129,7 @@ export function parseInput(def: CommandDef, argv: string[]): Input {
       fail("unknown_option", `unknown option --${key} for "${def.name}"`, undefined, `fornax ${def.name} --help`);
     }
     if (spec!.type === "boolean") {
-      input[camel(key)] = negate ? false : value === undefined ? true : !["0", "false", "no"].includes(value);
+      input[camel(key)] = negate ? false : value === undefined ? true : bool(key, value);
       continue;
     }
     if (value === undefined) {
@@ -128,7 +137,7 @@ export function parseInput(def: CommandDef, argv: string[]): Input {
       if (value === undefined) fail("missing_value", `option --${key} needs a value`);
     }
     if (spec!.type === "number") {
-      const n = Number(value);
+      const n = value!.trim() === "" ? NaN : Number(value);
       if (!Number.isFinite(n)) fail("invalid_option", `--${key} must be a number, got "${value}"`);
       input[camel(key)] = n;
     } else if (spec!.type === "list") {
@@ -139,13 +148,16 @@ export function parseInput(def: CommandDef, argv: string[]): Input {
     }
   }
 
+  input._ = positionals;
+  // with --help nothing else is checked: help never fails on the arguments around it
+  if (input.help) return input;
   const args = def.args ?? [];
   args.forEach((a, idx) => {
     if (a.variadic) {
       input[camel(a.name)] = positionals.slice(idx);
     } else if (positionals[idx] !== undefined) {
       input[camel(a.name)] = positionals[idx];
-    } else if (a.required && !input.help) {
+    } else if (a.required) {
       fail("missing_argument", `missing argument <${a.name}> for "${def.name}"`, a.help, `fornax ${def.name} --help`);
     }
   });
@@ -153,8 +165,41 @@ export function parseInput(def: CommandDef, argv: string[]): Input {
   if (positionals.length > max) {
     fail("unexpected_argument", `unexpected argument "${positionals[max]}" for "${def.name}"`, undefined, `fornax ${def.name} --help`);
   }
-  input._ = positionals;
   return input;
+}
+
+function bool(key: string, value: string): boolean {
+  const v = value.toLowerCase();
+  if (["1", "true", "yes"].includes(v)) return true;
+  if (["0", "false", "no"].includes(v)) return false;
+  return fail("invalid_option", `--${key} is a switch: --${key}, --no-${key} or --${key}=true|false, got "${value}"`);
+}
+
+/**
+ * Whether argv asks for JSON — decided before parsing, so that errors in parsing come out as JSON
+ * too. Only options before `--` count (after it they belong to `fornax run`'s command).
+ */
+export function jsonRequested(argv: string[]): boolean {
+  let json = false;
+  for (const tok of argv) {
+    if (tok === "--") break;
+    if (tok === "--json") json = true;
+    else if (tok === "--no-json") json = false;
+    else if (tok.startsWith("--json=")) json = ["1", "true", "yes"].includes(tok.slice(7).toLowerCase());
+  }
+  return json;
+}
+
+/** A command as data: `--help --json`, `fornax help --json` and agent-context. */
+export function describeCommand(def: CommandDef) {
+  return {
+    command: `fornax ${def.name}`,
+    tier: def.tier,
+    summary: def.summary,
+    args: (def.args ?? []).map((a) => ({ name: a.name, required: Boolean(a.required), variadic: Boolean(a.variadic), help: a.help })),
+    options: Object.entries(def.options ?? {}).map(([k, s]) => ({ name: `--${k}`, type: s.type, help: s.help, ...(s.default !== undefined ? { default: s.default } : {}) })),
+    examples: def.examples ?? [],
+  };
 }
 
 /** Destroy-tier commands call this with the name of what they are about to delete. */

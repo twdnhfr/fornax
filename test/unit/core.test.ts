@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defineCommand, parseInput, resolve } from "../../src/core/command.ts";
+import { defineCommand, jsonRequested, parseInput, resolve } from "../../src/core/command.ts";
 import { FornaxError } from "../../src/core/errors.ts";
 import { findFleetDir, loadFleet, policyViolations, repoOwner, resolveSite } from "../../src/core/fleet.ts";
 import { scrubUrl } from "../../src/core/probe.ts";
@@ -42,6 +42,27 @@ describe("argument parsing", () => {
   });
   test("missing required argument", () => {
     expect(() => parseInput(demo, [])).toThrow(/missing argument <site>/);
+  });
+  test("-h is --help, and help skips the argument checks", () => {
+    expect(parseInput(demo, ["-h"]).help).toBe(true);
+    expect(parseInput(demo, ["a", "b", "c", "--help"]).help).toBe(true);
+  });
+  test("other short flags are unknown options, not positionals", () => {
+    expect(() => parseInput(demo, ["-f"])).toThrow(/unknown option -f/);
+    const run = defineCommand({ name: "test variadic", summary: "x", tier: "read", args: [{ name: "cmd", help: "", variadic: true }], run: async () => ({ data: null }) });
+    expect(parseInput(run, ["ls", "-la"]).cmd).toEqual(["ls", "-la"]);
+  });
+  test("switches take only true/false values, numbers are never empty", () => {
+    expect(parseInput(demo, ["s", "--force=no"]).force).toBe(false);
+    expect(parseInput(demo, ["s", "--force=TRUE"]).force).toBe(true);
+    expect(() => parseInput(demo, ["s", "--force=maybe"])).toThrow(/is a switch/);
+    expect(() => parseInput(demo, ["s", "--lines="])).toThrow(/must be a number/);
+  });
+  test("--json is read before parsing, and not after --", () => {
+    expect(jsonRequested(["x", "--json"])).toBe(true);
+    expect(jsonRequested(["x", "--json=false"])).toBe(false);
+    expect(jsonRequested(["x", "--json", "--no-json"])).toBe(false);
+    expect(jsonRequested(["run", "s", "--", "cmd", "--json"])).toBe(false);
   });
   test("longest command prefix wins", () => {
     expect(resolve(["test", "demo", "x"])?.def.name).toBe("test demo");

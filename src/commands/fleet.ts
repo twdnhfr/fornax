@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { commands, defineCommand, GLOBAL_OPTIONS } from "../core/command.ts";
+import { commands, defineCommand, describeCommand, GLOBAL_OPTIONS } from "../core/command.ts";
 import { CONFIG_VERSION, upgradesFrom } from "../core/config-version.ts";
 import { fail } from "../core/errors.ts";
 import { configVersion, findFleetDir, loadFleet, policyViolations, readDoc, sites, upgradeText } from "../core/fleet.ts";
@@ -88,14 +88,7 @@ defineCommand({
   async run(_input, ctx) {
     const cmds = commands()
       .filter((c) => !c.internal)
-      .map((c) => ({
-        command: `fornax ${c.name}`,
-        tier: c.tier,
-        summary: c.summary,
-        args: (c.args ?? []).map((a) => ({ name: a.name, required: Boolean(a.required), help: a.help })),
-        options: Object.entries(c.options ?? {}).map(([k, s]) => ({ name: `--${k}`, type: s.type, help: s.help, ...(s.default !== undefined ? { default: s.default } : {}) })),
-        examples: c.examples ?? [],
-      }));
+      .map(describeCommand);
     let fleet: unknown = null;
     const dir = ctx.fleetDir ?? findFleetDir(ctx.cwd);
     if (dir) {

@@ -8,7 +8,7 @@ import { MODULES, type Server } from "../core/schema.ts";
 import { fleetAgent } from "../core/ssh-agent.ts";
 import { runnerFor } from "../core/ssh.ts";
 import { actor, etcCommit, etcCommitOutside, fleetRevision, fornaxMessage } from "../core/etc-history.ts";
-import { serverName } from "../core/names.ts";
+import { assertServerName, serverName } from "../core/names.ts";
 import { tailscaleApi } from "../core/tailscale.ts";
 import { q } from "../core/shell.ts";
 import { patchYaml } from "../core/yaml-patch.ts";
@@ -138,7 +138,7 @@ defineCommand({
     const p = await providerFor(fleet, String(input.provider));
     // without a name: two words like Forge's, not used in the fleet nor at the provider
     const name = input.name ? String(input.name) : serverName([...fleet.servers.keys(), ...(await p.list()).map((s) => s.name)]);
-    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) fail("invalid_option", `"${name}" is not a server name`, "lower-case letters, digits and -, like silent-comet");
+    assertServerName(name);
     if (fleet.servers.has(name)) fail("exists", `server "${name}" already exists in the fleet`);
     if (!input.name) ctx.log(`name: ${name}`);
     if (!p.create) notSupported(p, "order servers", `fornax server add ${name} --provider ${p.type} --host <ip>`);
@@ -276,14 +276,14 @@ defineCommand({
   name: "server destroy",
   summary: "delete a server at its provider and remove it from the fleet",
   tier: "destroy",
-  args: [{ name: "name", help: "server name", required: true }],
+  args: [{ name: "server", help: "server name", required: true }],
   options: {
     "keep-config": { type: "boolean", help: "keep servers/<name>.yaml" },
     "keep-secrets": { type: "boolean", help: "leave the server's 1Password item as it is (default: archive it)" },
   },
   async run(input, ctx) {
     const fleet = loadFleet(ctx);
-    const server = getServer(fleet, String(input.name));
+    const server = getServer(fleet, String(input.server));
     if (isProtected(fleet, server.server)) fail("protected", `${server.server} is protected by policy`, "remove it from policies.protected first");
     const live = sites(fleet, server).filter((s) => s.spec.state === "present");
     for (const s of live) if (isProtected(fleet, s.domain)) fail("protected", `${server.server} hosts the protected site ${s.domain}`);
@@ -356,8 +356,8 @@ defineCommand({
     const old = server.server;
     const p = server.provider.type !== "manual" && server.provider.id ? await providerFor(fleet, server.provider.type, server) : undefined;
     const name = input.newName ? String(input.newName) : serverName([...fleet.servers.keys(), ...(p ? (await p.list()).map((s) => s.name) : [])]);
-    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) fail("invalid_option", `"${name}" is not a server name`, "lower-case letters, digits and -, like silent-comet");
-    if (name === old) fail("invalid_option", `${old} already has that name`);
+    assertServerName(name);
+    if (name === old) fail("invalid_argument", `${old} already has that name`);
     if (fleet.servers.has(name)) fail("exists", `server "${name}" already exists in the fleet`);
     const tailnet = fleet.config.access === "tailscale";
     const ts = tailnet ? await tailscaleApi(fleet) : undefined;
@@ -471,11 +471,11 @@ defineCommand({
   name: "server snapshot",
   summary: "take a provider snapshot of a server (before risky changes)",
   tier: "write",
-  args: [{ name: "name", help: "server name", required: true }],
+  args: [{ name: "server", help: "server name", required: true }],
   options: { description: { type: "string", help: "snapshot description" } },
   async run(input, ctx) {
     const fleet = loadFleet(ctx);
-    const server = getServer(fleet, String(input.name));
+    const server = getServer(fleet, String(input.server));
     const p = await providerFor(fleet, server.provider.type, server);
     if (!p.snapshot) notSupported(p, "take snapshots");
     const id = await p.snapshot!(String(server.provider.id), String(input.description ?? `fornax ${new Date().toISOString()}`));
@@ -487,10 +487,10 @@ defineCommand({
   name: "server reinstall",
   summary: "wipe a server and reinstall Ubuntu 24.04 at the provider (everything on it is lost)",
   tier: "destroy",
-  args: [{ name: "name", help: "server name", required: true }],
+  args: [{ name: "server", help: "server name", required: true }],
   async run(input, ctx) {
     const fleet = loadFleet(ctx);
-    const server = getServer(fleet, String(input.name));
+    const server = getServer(fleet, String(input.server));
     if (isProtected(fleet, server.server)) fail("protected", `${server.server} is protected by policy`);
     requireConfirm(input, server.server);
     const p = await providerFor(fleet, server.provider.type, server);
@@ -515,12 +515,12 @@ defineCommand({
   summary: "set the reverse DNS (PTR) of a server's public addresses",
   tier: "write",
   args: [
-    { name: "name", help: "server name", required: true },
+    { name: "server", help: "server name", required: true },
     { name: "ptr", help: "hostname for the PTR record", required: true },
   ],
   async run(input, ctx) {
     const fleet = loadFleet(ctx);
-    const server = getServer(fleet, String(input.name));
+    const server = getServer(fleet, String(input.server));
     const p = await providerFor(fleet, server.provider.type, server);
     if (!p.rdns) notSupported(p, "set reverse DNS");
     const ips = [server.public_ipv4, server.public_ipv6].filter((x): x is string => Boolean(x));

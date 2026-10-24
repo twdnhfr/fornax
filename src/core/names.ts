@@ -1,3 +1,5 @@
+import { fail } from "./errors.ts";
+
 /**
  * Server names like Forge's: an adjective and a noun ("silent-comet", "roaming-glacier"). Easy to
  * say, easy to tell apart, nothing about what runs on the server (that changes; the name stays).
@@ -42,4 +44,9 @@ export function previewName(previewDomain: string, takenNames: Iterable<string>)
   const suffix = `.${previewDomain}`;
   const labels = [...takenNames].filter((n) => n.endsWith(suffix)).map((n) => n.slice(0, -suffix.length));
   return `${serverName(labels)}${suffix}`;
+}
+
+/** A server name given on the command line: it becomes the file name, the hostname and the tailnet name. */
+export function assertServerName(name: string): void {
+  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) fail("invalid_argument", `"${name}" is not a server name`, "lower-case letters, digits and -, at most 63, like silent-comet");
 }

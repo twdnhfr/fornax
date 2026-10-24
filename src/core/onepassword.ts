@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } fr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FornaxError, fail } from "./errors.ts";
+import { notice } from "./notice.ts";
 
 /**
  * 1Password via the `op` CLI. Secret values never appear in argv: items are created from
@@ -154,7 +155,7 @@ export class OnePassword {
     expiryChecked.add(item);
     try {
       const e = await this.expiry(ref);
-      if (e && daysUntil(e.date) <= expiryWarnDays) process.stderr.write(`warning: ${expiryNote(e.title, e.vault, e.date)}\n`);
+      if (e && daysUntil(e.date) <= expiryWarnDays) notice(`warning: ${expiryNote(e.title, e.vault, e.date)}`);
     } catch {
       /* a warning must never break the command that needed the secret */
     }

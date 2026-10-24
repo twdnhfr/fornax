@@ -1,6 +1,6 @@
 import { defineCommand, type Context, type Input } from "../core/command.ts";
 import { fail } from "../core/errors.ts";
-import { assertPolicies, getServer, loadFleet, type Fleet } from "../core/fleet.ts";
+import { assertPolicies, getServer, loadFleet, sites, type Fleet } from "../core/fleet.ts";
 import { applyPlan, checkWindow, contentDiffs, loadPlan, makePlan, probe, type Change, type Plan } from "../core/plan.ts";
 import type { Server } from "../core/schema.ts";
 import { desired, preflight, type Scope } from "../modules/index.ts";
@@ -168,7 +168,7 @@ echo "installed=$((before - after))"
   return { installed: Number(out.stdout.match(/installed=(-?\d+)/)?.[1] ?? 0), reboot: /reboot=yes/.test(out.stdout) };
 }
 
-function oneShot(name: string, summary: string, modules: (s: Server) => Scope, extra = "", updates = false) {
+function oneShot(name: string, summary: string, modules: (s: Server) => Scope, extra: string | ((fleet: Fleet, s: Server) => string) = "", updates = false) {
   defineCommand({
     name,
     summary,
@@ -190,7 +190,7 @@ function oneShot(name: string, summary: string, modules: (s: Server) => Scope, e
       const updLine = upd ? `\nsecurity updates: ${upd.installed} installed${upd.reboot ? " — a reboot is needed (unattended-upgrades reboots at auto_reboot, or reboot now)" : ""}` : "";
       return {
         data: { ...r, ...(upd ? { security_updates: upd } : {}) },
-        human: `${name.split(" ")[1]} done: ${r.applied} changes in ${r.rounds} round(s) on ${server.server}${r.in_sync ? ", now in sync" : `, ${r.remaining.length} still differ — fornax plan ${server.server}`}${updLine}${r.logs.length ? `\nlogs on server: ${r.logs.join(", ")}` : ""}${extra}`,
+        human: `${name.split(" ")[1]} done: ${r.applied} changes in ${r.rounds} round(s) on ${server.server}${r.in_sync ? ", now in sync" : `, ${r.remaining.length} still differ — fornax plan ${server.server}`}${updLine}${r.logs.length ? `\nlogs on server: ${r.logs.join(", ")}` : ""}${typeof extra === "function" ? extra(fleet, server) : extra}`,
         exitCode: r.in_sync ? 0 : 1,
       };
     },
@@ -209,4 +209,8 @@ oneShot(
   true,
 );
 
-oneShot("server provision", "install and configure everything the config describes (all modules and sites)", () => ({ modules: [], sites: [] }));
+oneShot("server provision", "install and configure everything the config describes (all modules and sites)", () => ({ modules: [], sites: [] }), (fleet, server) => {
+  // the code is not there yet: a provisioned site serves nothing until its first deploy
+  const deploying = sites(fleet, server).filter((s) => s.spec.state === "present" && s.spec.deploy.enabled && s.spec.repo);
+  return deploying.length ? `\nnext: ${deploying.map((s) => `fornax deploy ${s.domain}`).join(", ")}   (first deploy of each site; afterwards every push, after fornax git connect)` : "";
+});

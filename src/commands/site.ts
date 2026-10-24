@@ -85,7 +85,7 @@ defineCommand({
     const { site: resolved } = findSite(after, domain);
     return {
       data: { added: domain, server: server.server, file: path, user: resolved.user, php: resolved.php, root: resolved.root, next: `fornax plan ${server.server} --site ${domain}` },
-      human: `added ${domain} to ${server.server} (${path})\nuser ${resolved.user}, php ${resolved.php}, root ${resolved.root}\nnext: fornax plan ${server.server} --site ${domain}`,
+      human: `added ${domain} to ${server.server} (${path})\nuser ${resolved.user}, php ${resolved.php}, root ${resolved.root}\nnext: fornax plan ${server.server} --site ${domain}, then fornax apply <plan-id>  (on a server that is not provisioned yet: fornax server provision ${server.server})`,
     };
   },
 });

@@ -145,11 +145,16 @@ export class SshRunner implements Runner {
       if (/signing failed for .*-SK .*(incorrect passphrase|invalid format|device not found)/i.test(stderr)) {
         fail("security_key", `the security key did not sign in to ${this.server.server}`, "the PIN dialog was cancelled, the key was not touched in time, or the key plugged in is not one in ssh.root_keys — try again", undefined, { stderr: stderr.trim() });
       }
+      const last = stderr.trim().split("\n").pop() ?? "ssh failed";
+      // a refused key is the usual first-run problem: say which key fornax offered and where to set another
+      const refused = /Permission denied|Too many authentication failures/i.test(last);
       fail(
         "ssh_failed",
-        `cannot reach ${this.target}: ${stderr.trim().split("\n").pop() ?? "ssh failed"}`,
-        `check that the server is up and the key is authorised for ${this.settings.user}`,
-        undefined,
+        `cannot reach ${this.target}: ${last}`,
+        refused
+          ? `${this.target} refused the key — fornax logged in with ${loginKey(this.fleet)}. Set the key in fornax.yaml: ssh.identity_file: <private key file> or ssh.key: <secret reference> (op://…, env:…, file:…)`
+          : `check that the server is up and reachable on port ${this.settings.port}, and that ${this.settings.user} may log in`,
+        `fornax server status ${this.server.server}`,
         { stderr: stderr.trim() },
       );
     }
@@ -224,6 +229,15 @@ export async function interactive(fleet: Fleet, server: Server, remote: string):
   const cmd = user === "root" ? remote : `sudo bash -c ${q(remote)}`;
   const proc = Bun.spawn(["ssh", "-t", ...sshArgs(fleet, server, await fleetAgent(fleet)), cmd], { stdin: "inherit", stdout: "inherit", stderr: "inherit", env: sshEnv(fleet) });
   return proc.exited;
+}
+
+/** Which key a connection offers, in words (for errors). */
+function loginKey(fleet: Fleet): string {
+  const c = fleet.config.ssh;
+  if (c.security_key) return `the security key ${c.security_key}`;
+  if (c.key) return `the fleet key ${c.key} (ssh.key)`;
+  if (c.identity_file) return `${c.identity_file} (ssh.identity_file)`;
+  return "your ssh-agent's keys and ~/.ssh/config (no ssh.key or ssh.identity_file set)";
 }
 
 export const tail = (s: string, n: number) => s.trimEnd().split("\n").slice(-n).join("\n");

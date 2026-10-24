@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { commands, defineCommand, describeCommand, GLOBAL_OPTIONS } from "../core/command.ts";
 import { CONFIG_VERSION, upgradesFrom } from "../core/config-version.ts";
 import { fail } from "../core/errors.ts";
-import { configVersion, findFleetDir, loadFleet, policyViolations, readDoc, sites, upgradeText } from "../core/fleet.ts";
+import { configVersion, findFleetDir, isSecretRef, loadFleet, policyViolations, readDoc, sites, upgradeText } from "../core/fleet.ts";
 import { VERSION } from "../core/version.ts";
 
 defineCommand({
@@ -14,13 +14,17 @@ defineCommand({
   options: {
     "fleet-name": { type: "string", help: "name of the fleet (default: directory name)" },
     access: { type: "string", help: "ssh | tailscale", default: "ssh" },
+    "ssh-key": { type: "string", help: "the private key fornax logs in with: a file (~/.ssh/id_ed25519) or a secret reference (op://…, env:…, file:…) — default: your ssh-agent and ~/.ssh/config" },
   },
-  examples: ["fornax init ./fleet --fleet-name acme"],
+  examples: ["fornax init ./fleet --fleet-name acme", "fornax init ./fleet --fleet-name acme --ssh-key ~/.ssh/id_ed25519"],
   async run(input) {
     const dir = resolve(String(input.dir));
     if (existsSync(join(dir, "fornax.yaml"))) fail("exists", `${dir}/fornax.yaml already exists`);
     const name = String(input.fleetName ?? dir.split("/").pop());
     if (!["ssh", "tailscale"].includes(String(input.access))) fail("invalid_option", "--access must be ssh or tailscale");
+    const key = input.sshKey === undefined ? undefined : String(input.sshKey);
+    // a reference goes to ssh.key (loaded into fornax's own agent), a plain path to ssh.identity_file
+    const keyLine = !key ? "" : isSecretRef(key) ? `  key: ${key}\n` : `  identity_file: ${key}\n`;
     mkdirSync(join(dir, "servers"), { recursive: true });
     mkdirSync(join(dir, "snippets"), { recursive: true });
     writeFileSync(
@@ -32,7 +36,10 @@ access: ${input.access}
 
 ssh:
   user: root
-
+${keyLine || `  # the key fornax logs in with (default: your ssh-agent and ~/.ssh/config):
+  # identity_file: ~/.ssh/id_ed25519            # a key file
+  # key: op://Vault/fleet ssh/private key       # or a secret reference, held in fornax's own ssh-agent
+`}
 policies:
   # Only deploy repos of these owners (GitHub user/org). Remove to allow any.
   # allowed_repo_owners: [${name}]
@@ -45,7 +52,12 @@ tls:
 `,
     );
     writeFileSync(join(dir, ".gitignore"), ".fornax/\n");
-    return { data: { created: dir, fleet: name }, human: `created fleet "${name}" in ${dir}\nnext: fornax secrets setup   (1Password vault + service account: every credential fornax creates is stored there)\nthen: fornax server add <name> --host <ip-or-hostname>` };
+    // the fleet is meant to be versioned: review changes like code, see who wanted what
+    const git = Bun.spawnSync(["git", "-C", dir, "rev-parse", "--is-inside-work-tree"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0 ? "already in a git repo" : Bun.spawnSync(["git", "init", "-q", dir], { stdout: "ignore", stderr: "ignore" }).exitCode === 0 ? "git repo initialised" : "no git found — keep the fleet under version control yourself";
+    return {
+      data: { created: dir, fleet: name, git, ssh_key: key ?? null },
+      human: `created fleet "${name}" in ${dir} (fornax.yaml, servers/, snippets/; ${git})\nnext: fornax server add <name> --host <ip-or-hostname>\noptional: fornax secrets setup   (1Password vault + service account: every credential fornax creates is stored there)`,
+    };
   },
 });
 
@@ -113,7 +125,8 @@ defineCommand({
       }
     }
     const conventions = [
-      "Run fornax inside a fleet repo (the directory with fornax.yaml) or pass --fleet <dir>.",
+      "Run fornax inside a fleet repo (the directory with fornax.yaml), pass --fleet <dir>, or set $FORNAX_FLEET; elsewhere ~/.config/fornax/fleet is used when it exists.",
+      "First setup of a server: `fornax server add` → `fornax server bootstrap` → `fornax site add` → `fornax server provision` (plans and applies everything in one go) → `fornax deploy <site>`. After that, every change: edit (or `site add`) → `fornax plan` → `fornax apply`.",
       "Tiers: read = safe to run any time; write = changes servers/APIs/config, ask the human first; destroy = also needs --confirm=<name>.",
       "Change servers in two steps: `fornax plan <server>` (read, prints a plan id) then `fornax apply <plan-id>` (write). Never edit managed files on a server by hand — edit the fleet repo.",
       "Add --json for structured output. Errors are {error, code, hint, next}; `next` is the command to run next.",

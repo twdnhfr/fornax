@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-10-24
 
 - **Exit codes, frozen for 1.0:** 0 done and ok, 1 done but not ok (a result: `health` with a warning or worse, a failed deploy, `diff`/`dns status`/`env diff` with differences, …), 2 an error. `run` and `shell` keep the exit code of the command on the server and exit 255 on fornax's own errors, as ssh does. Before: errors exited 1 like results that were not ok, `health` exited 2 when critical, and `diff`, `dns status` and `env diff` exited 0 with differences.
 - **Option names, frozen for 1.0:** list options are singular — `server add --module`, `--service` (were `--modules`, `--services`; the plural keeps working for every list option). `server create --ssh-key` (a public key for root) is now `--authorized-key`: `--ssh-key` always means the private key fornax logs in with.

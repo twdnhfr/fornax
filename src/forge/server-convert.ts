@@ -9,7 +9,12 @@ import type { Fleet } from "../core/fleet.ts";
 import { all, FACT_FN, one, parseFacts } from "../core/probe.ts";
 import { MODULES, type Server } from "../core/schema.ts";
 import { runnerFor } from "../core/ssh.ts";
+import { REPOS } from "../modules/common.ts";
 import { PHP_INI_DEFAULTS } from "../modules/server.ts";
+
+/** The apt repos each module writes a source file for (`/etc/apt/sources.list.d/<name>.list`). */
+const MODULE_REPOS: Record<string, string[]> = { access: ["tailscale"], security: ["crowdsec"], web: ["nginx"], php: ["php", "node"], data: ["redis"] };
+const repoUrl = (key: string) => REPOS[key]!.line("K", "noble").match(/https?:\/\/\S+/)?.[0]?.replace(/\/+$/, "") ?? "";
 
 export const SERVER_AREAS = MODULES;
 export type ServerArea = (typeof MODULES)[number];
@@ -33,6 +38,9 @@ if [ -n "$v" ] && [ -f /etc/php/$v/fpm/php.ini ]; then
 fi
 grep -qsE '^\\s*requirepass ' /etc/redis/redis.conf /etc/redis/*.conf && fact redis_password yes || fact redis_password no
 apt-cache policy redis-server 2>/dev/null | grep -q packages.redis.io && fact redis_source official
+for f in /etc/apt/sources.list.d/*.list; do
+  [ -f "$f" ] && fact aptsrc "$f $(grep -vE '^\\s*#' "$f" | grep -oE 'https?://[^ ]+' | head -1)"
+done
 for f in /etc/nginx/conf.d/*.conf; do
   [ -f "$f" ] || continue; case "$f" in */fornax-*) continue;; esac
   # the first word of each statement (a statement may span lines, as gzip_types does)
@@ -50,6 +58,8 @@ export interface ServerFacts {
   redisPassword: boolean;
   redisOfficial: boolean;
   confd: { path: string; directives: string[] }[];
+  /** apt source files and the URL each points at. */
+  aptSources: { path: string; url: string }[];
 }
 
 export async function readServer(fleet: Fleet, server: Server): Promise<ServerFacts> {
@@ -65,6 +75,7 @@ export async function readServer(fleet: Fleet, server: Server): Promise<ServerFa
     ini: Object.fromEntries(all(f, "ini").map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)])),
     redisPassword: one(f, "redis_password") === "yes",
     redisOfficial: one(f, "redis_source") === "official",
+    aptSources: all(f, "aptsrc").map((l) => ({ path: l.split(" ")[0]!, url: l.split(" ")[1] ?? "" })).filter((x) => x.url),
     confd: all(f, "confd").map((l) => ({ path: l.split(" ")[0]!, directives: (l.split(" ")[1] ?? "").split(",").filter(Boolean) })),
   };
 }
@@ -138,8 +149,21 @@ export function planConversion(fleet: Fleet, server: Server, facts: ServerFacts,
       for (const x of fresh) changes.push(`firewall.allow: ${JSON.stringify(x)}`);
     }
   }
+  const retire = [...server.retire];
+  // a repo fornax manages, already set up under another file name: two sources with different keys
+  // for one URL make every `apt update` fail ("Conflicting values set for option Signed-By")
+  for (const area of areas) {
+    for (const key of MODULE_REPOS[area] ?? []) {
+      const own = `/etc/apt/sources.list.d/${REPOS[key]!.name}.list`;
+      for (const src of facts.aptSources) {
+        if (src.path !== own && src.url.replace(/\/+$/, "") === repoUrl(key) && !retire.includes(src.path)) {
+          retire.push(src.path);
+          changes.push(`retire: ${src.path} (the same apt repo as fornax's ${own})`);
+        }
+      }
+    }
+  }
   if (areas.includes("web")) {
-    const retire = [...server.retire];
     for (const c of facts.confd) {
       const clash = c.directives.filter((d) => NGINX_HTTP.has(d));
       if (!clash.length) continue;
@@ -152,8 +176,8 @@ export function planConversion(fleet: Fleet, server: Server, facts: ServerFacts,
         warnings.push(`${c.path} sets ${clash.join(", ")} (also in fornax's nginx.conf) next to other directives — nginx -t would fail; move the rest into a file of its own, then convert again`);
       }
     }
-    if (retire.length !== server.retire.length) set.push([["retire"], retire]);
   }
+  if (retire.length !== server.retire.length) set.push([["retire"], retire]);
   if (areas.includes("php")) {
     const def = server.php_default ?? server.php[server.php.length - 1];
     if (facts.phpDefault && facts.phpDefault !== def) {

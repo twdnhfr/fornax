@@ -16,6 +16,10 @@ const forge: ServerFacts = {
   ini: { memory_limit: "512M", upload_max_filesize: "40M", post_max_size: "50M", max_execution_time: "0", expose_php: "", "opcache.enable": "1", "opcache.memory_consumption": "512", "opcache.max_accelerated_files": "30000", "opcache.validate_timestamps": "0", "opcache.revalidate_freq": "2" },
   redisPassword: false,
   redisOfficial: true,
+  aptSources: [
+    { path: "/etc/apt/sources.list.d/crowdsec_crowdsec.list", url: "https://packagecloud.io/crowdsec/crowdsec/any/" },
+    { path: "/etc/apt/sources.list.d/nginx.list", url: "https://nginx.org/packages/mainline/ubuntu" },
+  ],
   confd: [
     { path: "/etc/nginx/conf.d/cloudflare.conf", directives: ["real_ip_header", "set_real_ip_from"] },
     { path: "/etc/nginx/conf.d/gzip.conf", directives: ["gzip_comp_level", "gzip_min_length", "gzip_proxied", "gzip_types", "gzip_vary"] },
@@ -35,7 +39,7 @@ describe("server convert", () => {
     expect(s.php_ini).toEqual({ upload_max_filesize: "40M", post_max_size: "50M", max_execution_time: "0", "opcache.memory_consumption": "512", "opcache.max_accelerated_files": "30000", "opcache.validate_timestamps": "0" });
     expect(s["redis.password"]).toBe(false);
     expect(s["redis.source"]).toBe("official");
-    expect(s.retire).toEqual(["/etc/nginx/conf.d/gzip.conf", "/etc/nginx/conf.d/uploads.conf"]);
+    expect(s.retire).toEqual(["/etc/apt/sources.list.d/crowdsec_crowdsec.list", "/etc/nginx/conf.d/gzip.conf", "/etc/nginx/conf.d/uploads.conf"]);
   });
   test("a firewall rule on an interface stays; fornax's own and SSH's are left to fornax", () => {
     const c = planConversion(fleet, server, forge, ["access"]);
@@ -50,6 +54,13 @@ describe("server convert", () => {
     expect(phpIni("8.4", { max_execution_time: "0", "opcache.validate_timestamps": "0" })).toContain("opcache.validate_timestamps = 0");
     expect(phpIni("8.4", { max_execution_time: "300" }, "cli")).toContain("max_execution_time = 0");
     expect(phpIni("8.4")).toContain("max_execution_time = 60");
+  });
+});
+
+describe("apt sources", () => {
+  test("a repo fornax manages under another file name is retired with its module; the same file name is simply rewritten", () => {
+    expect(set(["security"]).retire).toEqual(["/etc/apt/sources.list.d/crowdsec_crowdsec.list"]);
+    expect(set(["web"]).retire).toEqual(["/etc/nginx/conf.d/gzip.conf", "/etc/nginx/conf.d/uploads.conf"]);
   });
 });
 

@@ -19,6 +19,7 @@ export async function resolveSecret(ref: string, fleetDir: string, account?: str
   }
   if (ref.startsWith("keychain:")) {
     const [service, account] = ref.slice(9).split("/");
+    if (process.platform !== "darwin") fail("secret_unavailable", `${ref.split("/")[0]}: the Keychain is macOS only`, "on this machine use file:<path> (0600) or env:NAME for this secret");
     const p = Bun.spawnSync(["security", "find-generic-password", "-s", service!, ...(account ? ["-a", account] : []), "-w"], { stdout: "pipe", stderr: "pipe" });
     if (p.exitCode !== 0) fail("secret_unavailable", `no Keychain item "${service}"${account ? ` for ${account}` : ""}`, "add it with: security add-generic-password -s <service> -a <account> -w");
     return p.stdout.toString().replace(/\n$/, "");

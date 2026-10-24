@@ -69,7 +69,7 @@ describe("secrets", () => {
     process.env.FORNAX_TEST_SECRET = "abc";
     expect(await resolveSecret("env:FORNAX_TEST_SECRET", "/tmp")).toBe("abc");
     await expect(resolveSecret("hcloud_plaintext_token", "/tmp")).rejects.toThrow(/not a secret reference/);
-    await expect(resolveSecret("keychain:fornax-definitely-missing-item", "/tmp")).rejects.toThrow(/no Keychain item/);
+    await expect(resolveSecret("keychain:fornax-definitely-missing-item", "/tmp")).rejects.toThrow(process.platform === "darwin" ? /no Keychain item/ : /macOS only/);
   });
 });
 

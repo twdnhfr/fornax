@@ -221,6 +221,9 @@ function walk(node: Json, path: string, docPath: string[], w: Walk): void {
       child.type === "array" && isObject(child.items) ? [child.items as Json, `${at}[]`] : isMap(child) && isObject(child.additionalProperties) ? [child.additionalProperties as Json, `${at}.${MAP_KEYS[at] ?? "<name>"}`] : [child, at];
     const root = inner["x-root"] as string | undefined;
     doc ??= root ? (w.comments.consts.get(root) ?? w.stop.get(root)) : undefined;
+    // an object-level rule (e.g. "exactly one of source or content") would otherwise show nowhere
+    const rule = isObject(inner) ? (inner["x-format"] as string | undefined) : undefined;
+    if (rule) doc = [doc, `${rule[0]!.toUpperCase()}${rule.slice(1)}.`].filter(Boolean).join(" ");
     const presence = "default" in child && !isObject(child) ? `default ${code(child.default)}` : required.has(key) ? "required" : "optional";
     w.entries.push({ path: at, type: typeOf(child, MAP_KEYS[at]), presence, doc });
     if (isObject(inner) && !(root && w.stop.has(root))) walk(inner, innerPath, root ? [root] : [...docPath, key], w);
@@ -244,11 +247,11 @@ const INTRO = `# Configuration reference
 
 A fleet is a git repo: \`fornax.yaml\` at its top, one \`servers/<name>.yaml\` per server, and in each server file the server's sites under \`sites:\`. Every key of all three is listed here, in the order the schema defines them.
 
-Unknown keys are errors, not ignored: a typo fails \`fornax plan\` instead of silently doing nothing. "required" means required whenever the object around the key is there; "optional" without a default means the key is simply left out. \`[]\` in a path stands for each entry of a list, \`<domain>\` and the like for each key of a map.
+Unknown keys are errors, not ignored: a typo fails \`fornax plan\` instead of silently doing nothing. "required" means required whenever the object around the key is there; "optional" without a default means the key may be left out. \`[]\` in a path stands for each entry of a list, \`<domain>\` and the like for each key of a map.
 
 ## Secret references
 
-Fields that take a secret (tokens, passwords, keys) hold a reference to it, never the secret itself. fornax resolves it only when it needs the value:
+Fields that take a secret (tokens, passwords, the fleet's SSH key) hold a reference to it, never the secret itself. fornax resolves it only when it needs the value:
 
 | Reference | Resolves to |
 | --- | --- |

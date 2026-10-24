@@ -4,11 +4,11 @@
 
 A fleet is a git repo: `fornax.yaml` at its top, one `servers/<name>.yaml` per server, and in each server file the server's sites under `sites:`. Every key of all three is listed here, in the order the schema defines them.
 
-Unknown keys are errors, not ignored: a typo fails `fornax plan` instead of silently doing nothing. "required" means required whenever the object around the key is there; "optional" without a default means the key is simply left out. `[]` in a path stands for each entry of a list, `<domain>` and the like for each key of a map.
+Unknown keys are errors, not ignored: a typo fails `fornax plan` instead of silently doing nothing. "required" means required whenever the object around the key is there; "optional" without a default means the key may be left out. `[]` in a path stands for each entry of a list, `<domain>` and the like for each key of a map.
 
 ## Secret references
 
-Fields that take a secret (tokens, passwords, keys) hold a reference to it, never the secret itself. fornax resolves it only when it needs the value:
+Fields that take a secret (tokens, passwords, the fleet's SSH key) hold a reference to it, never the secret itself. fornax resolves it only when it needs the value:
 
 | Reference | Resolves to |
 | --- | --- |
@@ -607,7 +607,7 @@ Extra packages to install.
 
 list of objects · default `[]`
 
-A file fornax manages verbatim: content inline or from a path relative to the fleet dir.
+A file fornax manages verbatim: content inline or from a path relative to the fleet dir. A file needs exactly one of source or content.
 
 ### `files[].path`
 
@@ -917,7 +917,7 @@ string (a size such as 64M) · optional
 
 list of objects · default `[]`
 
-A file fornax manages verbatim: content inline or from a path relative to the fleet dir.
+A file fornax manages verbatim: content inline or from a path relative to the fleet dir. A file needs exactly one of source or content.
 
 ### `sites.<domain>.files[].path`
 

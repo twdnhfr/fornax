@@ -20,6 +20,7 @@ describe("config reference", () => {
     expect(ref.markdown).toContain("### `sites.<domain>.deploy.keep_releases`\n\nwhole number, at least 2 · default `5`\n\nHow many releases stay on the server (for rollbacks).");
     expect(ref.markdown).toContain("### `ssh.root_keys`\n\nlist of strings (an OpenSSH public key line) · optional\n\nExactly these public keys");
     expect(ref.markdown).toContain("### `tailscale.allow[].ports`\n\nlist of whole numbers from 1 to 65535, at least 1 entry · required");
+    expect(ref.markdown).toContain("relative to the fleet dir. A file needs exactly one of source or content.");
     expect(ref.undocumented).toContain("fleet");
   });
 

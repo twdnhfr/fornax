@@ -3,7 +3,7 @@ import { fail } from "../core/errors.ts";
 import { assertPolicies, getServer, loadFleet, sites, type Fleet } from "../core/fleet.ts";
 import { applyPlan, checkWindow, contentDiffs, loadPlan, makePlan, probe, type Change, type Plan } from "../core/plan.ts";
 import type { Server } from "../core/schema.ts";
-import { desired, preflight, type Scope } from "../modules/index.ts";
+import { assertOrder, desired, preflight, type Scope } from "../modules/index.ts";
 import { autoSync } from "./secrets.ts";
 import { pushCopy } from "../core/fleet-copy.ts";
 import { runnerFor } from "../core/ssh.ts";
@@ -34,6 +34,7 @@ async function buildPlan(fleet: Fleet, server: Server, scope: Scope, ctx: Contex
   assertPolicies(fleet, server);
   ctx.log(`probing ${server.server} …`);
   const facts = await preflight(fleet, server);
+  assertOrder(server, facts, scope);
   const resources = desired(fleet, server, facts, scope);
   const probed = await probe(fleet, server, resources);
   const plan = makePlan(fleet, server, resources, probed, scope);

@@ -63,6 +63,7 @@ Without `--json` it goes to stderr as `error [<code>]: <message>`, followed by `
 | `no_backup`, `no_dns`, `no_fleet_copy`, `no_notify`, `no_onepassword`, `no_preview_domain`, `no_tailscale_api`, `no_tailscale_key` | the fleet has no configuration for this feature yet |
 | `no_credentials`, `no_forge_token`, `no_github_token`, `no_ssh_key` | a credential the command needs is missing |
 | `no_repo`, `deploy_disabled`, `no_deploy_key`, `no_webhook`, `not_set_up` | the site is not set up for this (yet): plan + apply, or the config |
+| `not_provisioned` | a plan of single sites on a server fornax has not set up yet: `fornax server provision` comes first |
 | `not_github` | `git connect` works with GitHub only; elsewhere add the key and the webhook by hand |
 | `no_env`, `no_local_env`, `no_key`, `no_history`, `no_logs`, `no_public_ip` | something the command reads does not exist (yet) |
 | `no_terminal` | `fornax shell` needs a terminal |

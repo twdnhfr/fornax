@@ -131,6 +131,7 @@ defineCommand({
       "Change servers in two steps: `fornax plan <server>` (read, prints a plan id) then `fornax apply <plan-id>` (write). Never edit managed files on a server by hand — edit the fleet repo.",
       "fornax logs in with SSH as ssh.user (default root) and the fleet's key: `fornax server add` prints the login; --ssh-user/--ssh-port or `fornax server set` change it.",
       "Add --json for structured output. Errors are {error, code, hint, next}; `next` is the command to run next.",
+      "Steps that need an earlier one refuse with that step as `next` (not_provisioned, not_set_up) instead of stopping half-way.",
       "Commands never prompt. If something is missing they fail with a hint instead of waiting.",
       "Re-running a failed command is safe: everything is idempotent.",
       "Use `fornax explain <site|server>` for facts (paths, users, logs, certs) instead of guessing.",

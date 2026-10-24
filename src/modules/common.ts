@@ -33,6 +33,8 @@ export interface Facts {
   legacyAdmin?: boolean;
   /** composer auth.json per site, resolved for this plan (only hashes end up in the plan). */
   composerAuth?: Record<string, { value: string; ref?: string }>;
+  /** fornax set the server's web stack up (a full plan was applied): single-site plans may follow. */
+  provisioned?: boolean;
   /** Public half of the fleet's SSH key (ssh.key), for Tailscale fleets: taken off root once Tailscale SSH works. */
   fleetKey?: string;
 }

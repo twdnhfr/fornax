@@ -20,12 +20,31 @@ export interface Scope {
   sites: string[];
 }
 
+/** The web module's directory: there once a full plan (provision) set the server up — live, whichever machine did it. */
+const PROVISIONED = "[ -d /etc/nginx/fornax ]";
+
+/** Whether fornax set the server's web stack up (always true for servers whose web stack fornax does not manage). */
+export async function isProvisioned(fleet: Fleet, server: Server): Promise<boolean> {
+  if (!server.modules.includes("web")) return true;
+  return (await runnerFor(fleet, server).run(PROVISIONED, { allowFail: true })).code === 0;
+}
+
+/**
+ * Some steps need others first. A plan of single sites on a server fornax never set up would stop
+ * half-way (no nginx, PHP or users' directories of fornax there): refused, with the step that comes first.
+ */
+export function assertOrder(server: Server, facts: ModuleCtx["facts"], scope: Scope): void {
+  if (!scope.sites.length || facts.provisioned || !server.modules.includes("web")) return;
+  fail("not_provisioned", `${server.server} is not set up yet — a plan of only ${scope.sites.join(", ")} would stop half-way (no nginx and PHP from fornax there)`, "the first setup installs the server and all its sites in one go", `fornax server provision ${server.server}`);
+}
+
 export async function preflight(fleet: Fleet, server: Server): Promise<ModuleCtx["facts"]> {
   const out = await runnerFor(fleet, server).run(`${FACT_FN}
 . /etc/os-release; fact id "$ID"; fact codename "$VERSION_CODENAME"; fact version "$VERSION_ID"; fact arch "$(uname -m)"
 case "$VERSION_CODENAME" in noble) fact php_ppa yes;; *) curl -fsI --max-time 10 "https://ppa.launchpadcontent.net/ondrej/php/ubuntu/dists/$VERSION_CODENAME/Release" >/dev/null 2>&1 && fact php_ppa yes || fact php_ppa no;; esac
 ${LEGACY_GONE} || fact legacy yes
 id -u anvil >/dev/null 2>&1 && ! id -u fornax >/dev/null 2>&1 && fact legacy_admin yes
+${PROVISIONED} && fact provisioned yes
 true`);
   const f = parseFacts(out.stdout);
   const version = one(f, "version") ?? "?";
@@ -63,7 +82,7 @@ true`);
     const listed = Bun.spawnSync(["ssh-add", "-L"], { env: { ...process.env, SSH_AUTH_SOCK: await agent }, stdout: "pipe" }).stdout.toString();
     fleetKey = listed.split("\n").find((l) => l.startsWith("ssh-"))?.split(/\s+/).slice(0, 2).join(" ");
   }
-  return { arch, codename: one(f, "codename")!, version, phpPpa, binary, heartbeat, ntfyToken, composerAuth, fleetKey, legacy: one(f, "legacy") === "yes", legacyAdmin: one(f, "legacy_admin") === "yes" };
+  return { arch, codename: one(f, "codename")!, version, phpPpa, binary, heartbeat, ntfyToken, composerAuth, fleetKey, legacy: one(f, "legacy") === "yes", legacyAdmin: one(f, "legacy_admin") === "yes", provisioned: one(f, "provisioned") === "yes" };
 }
 
 /**

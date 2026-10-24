@@ -11,10 +11,22 @@ import { asUser, b64, q } from "../core/shell.ts";
 import { runnerFor, tail } from "../core/ssh.ts";
 import { GitHub, sameKey } from "../githost/github.ts";
 import { serve } from "../remote/hook.ts";
+import { isProvisioned } from "../modules/index.ts";
 import { siteHookUrl } from "../modules/site.ts";
 import { loadRuntime, notify, release, type ReleaseResult } from "../remote/release.ts";
 
 // ---- internal: run on the server -------------------------------------------------
+
+/** A site missing on its server: the step before is its plan + apply — or, on a server fornax never set up, provision. */
+async function notSetUp(fleet: Fleet, server: Server, domain: string, what: string): Promise<never> {
+  const first = !(await isProvisioned(fleet, server));
+  return fail(
+    "not_set_up",
+    what,
+    first ? `${server.server} is not set up yet: the first setup installs the server and its sites in one go` : "the site's plan + apply sets it up there",
+    first ? `fornax server provision ${server.server}` : `fornax plan ${server.server} --site ${domain}`,
+  );
+}
 
 defineCommand({
   name: "release",
@@ -115,7 +127,7 @@ exit $rc`;
     await ensureServerBinary(fleet, server, ctx.log);
     ctx.log(`deploying ${site.domain} on ${server.server} …`);
     const res = await runnerFor(fleet, server).run(script, { allowFail: true, timeoutMs: 1_900_000, onStdout: (l) => ctx.log(`  ${l}`) });
-    if (res.code === 3) fail("not_set_up", `${site.domain} is not set up for deploys on ${server.server}`, undefined, `fornax plan ${server.server} --site ${site.domain}`);
+    if (res.code === 3) await notSetUp(fleet, server, site.domain, `${site.domain} is not set up for deploys on ${server.server}`);
     const result = await lastResult(fleet, server, site);
     if (!result) throw new FornaxError("deploy_failed", "deploy did not produce a result", tail(res.stdout + res.stderr, 15));
     const ok = result.status === "success";
@@ -249,7 +261,7 @@ defineCommand({
       if (!toRemove.length) fail("unknown_forge_hook", `${repo} has no Forge webhook ${input.forgeHook}`, `Forge hooks: ${forgeHooks.map((h) => h.id).join(", ")}`);
     }
     const { key, secret } = await readKeyAndSecret(fleet, server, site);
-    if (!key || (!keyOnly && !secret)) fail("not_set_up", `deploy key or webhook secret missing on ${server.server}`, undefined, `fornax plan ${server.server} --site ${site.domain}`);
+    if (!key || (!keyOnly && !secret)) await notSetUp(fleet, server, site.domain, `deploy key or webhook secret of ${site.domain} missing on ${server.server}`);
     const url = viaSite ? siteHookUrl(site) : `https://${server.webhook?.domain}/fornax/hook/${site.domain}`;
     const done: string[] = [];
     const keys = await gh.listKeys(repo!);

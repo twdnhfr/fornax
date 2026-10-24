@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { loadFleet, resolveSite, sites } from "../../src/core/fleet.ts";
 import { applyScript, computeChanges, parseProbe, probeScript } from "../../src/core/plan.ts";
 import { absent, file, packages } from "../../src/core/resource.ts";
-import { desired } from "../../src/modules/index.ts";
+import { assertOrder, desired } from "../../src/modules/index.ts";
 import { cronConf, daemonConf, poolConf, vhostConf } from "../../src/modules/site.ts";
 import { ufwRules } from "../../src/modules/server.ts";
 
@@ -113,5 +113,23 @@ describe("retired files", () => {
     const withRetire = { ...server, sites: { ...server.sites, "shop.example.com": { ...server.sites["shop.example.com"]!, retire } } };
     const ids = desired(fleet, withRetire, ctx.facts).map((x) => x.id);
     expect(ids.indexOf("absent:/etc/nginx/sites-enabled/old.example.com")).toBeLessThan(ids.indexOf("absent:/etc/nginx/sites-available/old.example.com"));
+  });
+});
+
+describe("order of steps", () => {
+  const facts = { ...ctx.facts };
+  test("single sites on a server fornax never set up are refused, with provision next", () => {
+    expect(() => assertOrder(server, facts, { modules: [], sites: ["shop.example.com"] })).toThrow("not set up yet");
+    try {
+      assertOrder(server, facts, { modules: [], sites: ["shop.example.com"] });
+    } catch (e) {
+      expect((e as { next?: string }).next).toBe("fornax server provision web-1");
+    }
+  });
+  test("the whole server, its modules, a set-up server and servers without fornax's web stack pass", () => {
+    expect(() => assertOrder(server, facts, { modules: [], sites: [] })).not.toThrow();
+    expect(() => assertOrder(server, facts, { modules: ["base", "access"], sites: [] })).not.toThrow();
+    expect(() => assertOrder(server, { ...facts, provisioned: true }, { modules: [], sites: ["shop.example.com"] })).not.toThrow();
+    expect(() => assertOrder({ ...server, modules: [] }, facts, { modules: [], sites: ["shop.example.com"] })).not.toThrow();
   });
 });

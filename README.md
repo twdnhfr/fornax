@@ -131,6 +131,7 @@ fornax history web-1 --path nginx     # who changed what in /etc, and when
 | [Fleet copies](docs/fleet-copy.md) | the fleet repo, encrypted and signed, on every server |
 | [History](docs/history.md) | `/etc` in git: how a server got to where it is |
 | [Safety](docs/safety.md) | permission tiers, guard rails, agent setup |
+| [Compatibility](docs/compatibility.md) | what stays stable from 1.0: config, commands, JSON, error and exit codes, tiers, server layout |
 | [Security](SECURITY.md) | threat model and known limits |
 | [Development](docs/development.md) | tests, integration setup |
 
@@ -142,7 +143,7 @@ fornax history web-1 --path nginx     # who changed what in /etc, and when
 
 ## Status
 
-fornax runs the author's production servers — taken over from Laravel Forge in October 2026 — and is tested end to end on throwaway VMs and real Hetzner servers. It is not 1.0 yet: the config format is versioned and upgrades are automatic (`fornax fleet upgrade`), but commands and output may still change. See the [changelog](CHANGELOG.md).
+fornax runs the author's production servers — taken over from Laravel Forge in October 2026 — and is tested end to end on throwaway VMs and real Hetzner servers. It is not 1.0 yet: the config format is versioned and upgrades are automatic (`fornax fleet upgrade`), but commands and output may still change. What 1.0 will promise is in [compatibility](docs/compatibility.md); see the [changelog](CHANGELOG.md).
 
 ## License
 

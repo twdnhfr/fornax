@@ -6,6 +6,8 @@
 | `write` | `apply`, `deploy`, `rollback`, `env push`, `server create`, `dns sync` … | change servers or remote APIs |
 | `destroy` | `site remove`, `server destroy`, `server reinstall` | also need `--confirm=<exact name>` |
 
+A command keeps its tier within a major version, so an allowlist of read commands stays safe across updates ([compatibility](compatibility.md)).
+
 Plans that delete something need `--confirm=<server>` on apply. Only one apply runs per server at a time, and the check that the server has not changed since the plan happens under that lock. Firewall changes add missing rules before removing extra ones, so SSH is never cut off. fornax prunes its own traces on the server (backups after 14 days, logs after 90, the last 50 deploy logs per site). nginx, PHP-FPM, sshd and sudoers changes are validated before reload; a rejected config is rolled back automatically. Every script fornax runs is kept with its output in `/var/log/fornax/` on the server.
 
 ## For Claude Code

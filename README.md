@@ -1,10 +1,10 @@
 # fornax
 
-**Run your PHP and Laravel servers from a git repo — self-hosted, agent-first, no dashboard.**
+**Run your PHP and Laravel servers from a git repo — self-hosted, agent-first, no hosted dashboard.**
 
 fornax sets up Ubuntu servers, puts PHP and Laravel sites on them, deploys on every push, renews certificates and backs everything up. What your servers should look like lives in a few YAML files in a git repo — the *fleet*. fornax compares that with what is really on the servers, shows you the difference as a plan, and applies exactly that plan over SSH.
 
-It is meant for people who run a handful of servers for their own apps or their clients' — the kind of setup Laravel Forge or Ploi are used for — and who want to own it: plain files, no SaaS, no daemon on a central box, and a CLI that an AI agent can drive as safely as you can.
+It is meant for people who run a handful of servers for their own apps or their clients' — the kind of setup Laravel Forge or Ploi are used for — and who want to own it: plain files, no SaaS or hosted dashboard, no daemon on a central box, and a CLI that an AI agent can drive as safely as you can. For a look at the fleet in a browser there is a local dashboard that runs the very same commands.
 
 ```yaml
 # servers/web-1.yaml
@@ -118,6 +118,14 @@ fornax env pull | push shop.example.com
 fornax history web-1 --path nginx     # who changed what in /etc, and when
 ```
 
+## Local dashboard
+
+```bash
+fornax ui                             # opens http://127.0.0.1:<port>/?token=… in your browser
+```
+
+For humans who would rather click: the fleet at a glance, server status, health, certificates, backups, releases and logs per server and site, and the basic write steps — a new site, its plan, the apply after a confirmation, a deploy. It is a thin layer over the CLI: every button runs the same command in the same process, with the same validation, tiers and errors, and its log streams into the page (including "touch your security key"). Destroying is left to the terminal. It listens on 127.0.0.1 only, answers only a browser holding the random token from the printed link (traded for an HttpOnly, SameSite=Strict cookie), rejects foreign `Host` headers and cross-site requests, loads nothing from the internet, and stops after 30 minutes without requests. Agents keep using the CLI. More in [docs/ui.md](docs/ui.md).
+
 ## Documentation
 
 | | |
@@ -129,6 +137,7 @@ fornax history web-1 --path nginx     # who changed what in /etc, and when
 | [Hardware keys](docs/hardware-keys.md) | root only with a YubiKey; working as a site's user |
 | [Fleet copies](docs/fleet-copy.md) | the fleet repo, encrypted and signed, on every server |
 | [History](docs/history.md) | `/etc` in git: how a server got to where it is |
+| [Local dashboard](docs/ui.md) | `fornax ui`: what it shows, how it is secured |
 | [Safety](docs/safety.md) | permission tiers, guard rails, agent setup |
 | [Security](SECURITY.md) | threat model and known limits |
 | [Development](docs/development.md) | tests, integration setup |

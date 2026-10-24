@@ -14,7 +14,7 @@ fornax agent-context          # conventions, every command with its tier, the cu
 fornax <command> --help       # arguments and options of one command
 ```
 
-Run fornax **inside the fleet repo** (or pass `--fleet <dir>`). Add `--json` when you need to parse the result.
+Run fornax **inside the fleet repo** (or pass `--fleet <dir>`). Add `--json` when you need to parse the result. `fornax ui` is a local web dashboard for humans over the same commands — you keep using the CLI; suggest `fornax ui` only when the user wants to click through it themselves.
 
 ## Permission tiers
 

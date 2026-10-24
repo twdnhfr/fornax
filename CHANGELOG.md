@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.1 — unreleased
+## 1.0.1 — 2026-10-24
 
 - **fornax is public.** `self-update` downloads releases over plain HTTPS — no GitHub CLI needed any more; it stays the way in for a private fork. Trust still comes from the signature, never from the channel. The README installs with `curl`.
 

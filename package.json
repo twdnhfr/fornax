@@ -1,6 +1,6 @@
 {
   "name": "fornax",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Agent-first CLI to provision and run PHP/Laravel servers — a self-hosted alternative to Laravel Forge",
   "type": "module",
   "license": "MIT",

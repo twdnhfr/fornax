@@ -71,7 +71,7 @@ plan 3f9c2a1e saved — review, then: fornax apply 3f9c2a1e
 | --- | --- |
 | **Fleet** | A git repo with `fornax.yaml` (access, TLS, backups, secrets, policies) and one `servers/<name>.yaml` per server. One fleet per team or client. fornax finds it from the current directory upwards, or uses `$FORNAX_FLEET` / `~/.config/fornax/fleet`. |
 | **Server** | An Ubuntu machine reached over SSH, directly or through Tailscale. What fornax manages on it comes in *modules*: `base`, `access`, `security`, `web`, `php`, `data`. |
-| **Site** | One app on a server: a repo, its own Linux user, a PHP version, a database, daemons, cron, TLS, extra names. Presets `laravel`, `php` and `static` know how to build and serve each kind. |
+| **Site** | One app on a server: a repo, its own Linux user, a PHP version, a database, daemons, cron, TLS, extra names. Presets `laravel`, `php`, `static` and `node` (Next.js and other apps with their own server, behind nginx) know how to build and serve each kind. |
 | **Plan** | The difference between fleet and server, saved with an id. `apply <id>` runs exactly that — after you, or your agent, have read it. |
 | **Release** | One deploy of a site: `releases/<time>` next to `current`, with shared `storage/` and `.env`. The layout is Forge's, so taken-over sites keep working. |
 | **Secret reference** | Secrets never live in the fleet: `op://vault/item/field`, `env:NAME`, `file:path` or `keychain:service`, resolved only while applying. Credentials fornax creates go to 1Password by themselves. |
@@ -124,7 +124,7 @@ A complete example fleet is in [`examples/fleet/`](examples/fleet/).
 
 ```bash
 fornax health                         # every server and site at a glance
-fornax logs shop.example.com laravel  # nginx, access, laravel, daemon, deploy, php
+fornax logs shop.example.com laravel  # nginx, access, laravel, daemon, deploy, php, app (node)
 fornax run shop.example.com -- php artisan migrate:status   # as the site's user, with its PHP
 fornax shell shop.example.com         # interactive, as the site's user
 fornax deploy | rollback shop.example.com

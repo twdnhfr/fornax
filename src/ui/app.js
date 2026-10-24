@@ -625,6 +625,7 @@ function viewNewSite(preselect) {
   const db = h("select", { class: C.input, name: "db" }, h("option", { value: "" }, "none"), h("option", { value: "mysql" }, "mysql"), h("option", { value: "postgres" }, "postgres"));
   const schedule = h("input", { class: C.checkbox, name: "schedule", type: "checkbox" });
   const daemons = h("textarea", { class: C.textarea, name: "daemons", rows: "2", placeholder: "php artisan horizon", spellcheck: "false" });
+  const start = h("input", { class: C.input, name: "start", type: "text", placeholder: "bun run start -- -H 127.0.0.1", autocomplete: "off", spellcheck: "false" });
   const cmdPreview = h("code", { class: C.codeBlock });
   const submit = h("button", { class: C.btnPrimary, type: "submit" }, "Add site", tierBadge("write", true));
 
@@ -642,6 +643,7 @@ function viewNewSite(preselect) {
       db: db.value,
       schedule: schedule.checked,
       daemon: daemons.value.split("\n").map((l) => l.trim()).filter(Boolean),
+      start: preset.value === "node" ? start.value.trim() : "",
     };
     if (!options.daemon.length) delete options.daemon;
     return { args, options };
@@ -692,6 +694,7 @@ function viewNewSite(preselect) {
           field("database", db),
           field("scheduler", check(schedule, "run the Laravel scheduler every minute")),
           field("daemons", daemons, "one command per line (supervisor)"),
+          field("start command", start, "node preset only: how the app's server starts (listen on 127.0.0.1)"),
         ),
         h(
           "div",

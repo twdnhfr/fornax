@@ -79,6 +79,17 @@ export function handlerFor(name: string): Handler {
   // a site's own Redis (core/fleet.ts siteRedis): a running one restarts with its new config
   const redis = name.match(/^fornax-redis@([\w-]+)$/);
   if (redis) return { reload: `systemctl daemon-reload; systemctl try-restart ${redis[0]}` };
+  // a node app's units (modules/site.ts nodeUnitConf) changed: its release starts with them in the
+  // other slot and takes over without downtime — or fails, and the running one keeps serving.
+  // Without deploys (no runtime) the running slot simply restarts.
+  const node = name.match(/^fornax-node@([a-z0-9.-]+)$/);
+  if (node) {
+    const units = (["a", "b"] as const).map((x) => `fornax-node-${node[1]!.replace(/[^a-z0-9]+/g, "-")}-${x}.service`);
+    const running = units.map((u) => `systemctl is-active -q ${u}`).join(" || ");
+    return {
+      reload: `systemctl daemon-reload; if ${running}; then if [ -f /etc/fornax/sites/${node[1]}.json ]; then /usr/local/bin/fornax release ${node[1]} --restart >/dev/null; else systemctl try-restart ${units.join(" ")}; fi; fi`,
+    };
+  }
   return HANDLERS[name] ?? HANDLERS.none!;
 }
 

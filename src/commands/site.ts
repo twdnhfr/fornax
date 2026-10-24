@@ -30,6 +30,7 @@ defineCommand({
     repo: { type: "string", help: "git repo: owner/name (GitHub), git@…, https://… or file:///…" },
     branch: { type: "string", help: "branch to deploy", default: "main" },
     preset: { type: "string", help: `deploy preset: ${PRESETS.join(", ")}`, default: "laravel" },
+    start: { type: "string", help: "--preset node: the command that starts the app, e.g. 'bun run start'" },
     php: { type: "string", help: "PHP version (default: the server's default)" },
     user: { type: "string", help: "Linux user (default: first label of the domain)" },
     db: { type: "string", help: "create a database: mysql | postgres" },
@@ -42,6 +43,7 @@ defineCommand({
   examples: [
     "fornax site add web-1 shop.example.com --repo acme/shop --db postgres --schedule --daemon 'php8.4 artisan horizon'",
     "fornax site add web-1 docs.example.com --repo acme/docs --preset static",
+    "fornax site add web-1 app.example.com --repo acme/app --preset node --start 'bun run start'",
     "fornax site add web-1 --preview --repo acme/demo   # e.g. quiet-harbor.example.com",
   ],
   async run(input, ctx) {
@@ -67,6 +69,10 @@ defineCommand({
     if (input.repo) site.repo = String(input.repo);
     if (input.branch !== "main") site.branch = input.branch;
     if (input.preset !== "laravel") site.preset = input.preset;
+    if ((input.preset === "node") !== Boolean(input.start)) {
+      fail("invalid_option", input.start ? "--start is for --preset node" : "--preset node needs --start, the command that starts the app", "e.g. --start 'bun run start' or --start 'node .next/standalone/server.js'");
+    }
+    if (input.start) site.node = { start: String(input.start) };
     if (input.php) site.php = String(input.php);
     if (input.user) site.user = String(input.user);
     if (input.db) {

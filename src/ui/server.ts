@@ -33,7 +33,7 @@ export const ACTIONS: Record<string, readonly string[]> = {
   logs: ["lines", "grep"],
   explain: ["offline"],
   plan: ["site", "module"],
-  "site add": ["preview", "repo", "branch", "preset", "php", "user", "db", "alias", "tls", "www", "daemon", "schedule"],
+  "site add": ["preview", "repo", "branch", "preset", "php", "user", "db", "alias", "tls", "www", "daemon", "schedule", "start"],
   apply: [],
   deploy: ["ref"],
 };

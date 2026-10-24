@@ -4,7 +4,7 @@ import { findSite, getServer, siteRedis, loadFleet, policyViolations, sites, typ
 import { all, FACT_FN, num, one, parseFacts, scrubUrl } from "../core/probe.ts";
 import type { Server } from "../core/schema.ts";
 import { asUser, q } from "../core/shell.ts";
-import { DEPLOY_LOG_DIR } from "../core/runtime.ts";
+import { DEPLOY_LOG_DIR, nodeSlots, SITE_LOG_DIR } from "../core/runtime.ts";
 import { runnerFor, tail } from "../core/ssh.ts";
 
 const UNITS = ["nginx", "mysql", "postgresql", "redis-server", "memcached", "supervisor", "fail2ban", "crowdsec", "ufw", "tailscaled", "cron", "fornax-hook", "ssh"];
@@ -173,7 +173,7 @@ defineCommand({
 
 // ---- logs ---------------------------------------------------------------------
 
-export const LOG_KINDS = ["nginx", "access", "laravel", "daemon", "deploy", "php"] as const;
+export const LOG_KINDS = ["nginx", "access", "laravel", "daemon", "deploy", "php", "app"] as const;
 
 function logScript(site: ResolvedSite, kind: string, lines: number, grep?: string): string {
   const filter = grep ? `| grep -E -- ${q(grep)}` : "";
@@ -216,6 +216,13 @@ ${asUser(
 [ -n "$f" ] || { echo "no deploy log for ${site.domain}" >&2; exit 3; }
 echo "# $f" >&2; sed -e 's/\\x1b\\[[0-9;]*m//g' "$f" | tail -n ${lines} ${filter}`,
 )}`;
+    // a node app's output (root-owned, outside the home); its units' journal says why one did not start
+    case "app": {
+      if (!site.node) return fail("invalid_option", `${site.domain} is no node app (preset ${site.spec.preset})`, "app logs are for preset node; laravel has `fornax logs <site> laravel`");
+      const units = nodeSlots(site, site.node.ports).slots.map((x) => `-u ${x.unit}`).join(" ");
+      return `f=${SITE_LOG_DIR(site.user)}/app.log
+if [ -f "$f" ]; then echo "# $f" >&2; ${t('"$f"')}; else echo "# journalctl ${units}" >&2; journalctl ${units} --no-pager -n ${lines} ${filter}; fi; true`;
+    }
     case "php":
       return `echo "# journalctl -u php${site.php}-fpm" >&2; journalctl -u php${site.php}-fpm --no-pager -n ${lines} ${filter}; f=/var/log/php${site.php}-fpm.log; [ -f $f ] && { echo "# $f" >&2; ${t("$f")}; }; true`;
   }
@@ -224,7 +231,7 @@ echo "# $f" >&2; sed -e 's/\\x1b\\[[0-9;]*m//g' "$f" | tail -n ${lines} ${filter
 
 defineCommand({
   name: "logs",
-  summary: "tail a site's logs: nginx (errors), access, laravel, daemon, deploy, php",
+  summary: "tail a site's logs: nginx (errors), access, laravel, daemon, deploy, php, app (a node app's output)",
   tier: "read",
   args: [
     { name: "site", help: "site domain", required: true },
@@ -263,8 +270,8 @@ fi
 [ -e /etc/nginx/sites-enabled/${site.domain} ] && fact vhost /etc/nginx/sites-enabled/${site.domain}
 for f in /etc/php/${site.php}/fpm/pool.d/*.conf; do grep -qE "^user *= *${site.user}$" "$f" 2>/dev/null && { fact pool "$f"; fact socket "$(grep -E '^listen *=' "$f" | cut -d= -f2 | tr -d ' ')"; }; done
 for c in $(grep -lsE '^user=${site.user}$' /etc/supervisor/conf.d/*.conf); do fact daemon_conf "$c"; done
-command -v supervisorctl >/dev/null && for p in $(grep -hsE '^\\[program:' $(grep -lsE '^user=${site.user}$' /etc/supervisor/conf.d/*.conf) | sed 's/\\[program:\\(.*\\)\\]/\\1/'); do fact daemon "$(supervisorctl status "$p:*" 2>/dev/null | awk '{print $1" "$2}' | tr '\\n' ';')"; done
-grep -hsE "^[^#].*[[:space:]]${site.user}[[:space:]]" /etc/crontab /etc/cron.d/* | while read -r l; do fact cron "$l"; done
+command -v supervisorctl >/dev/null && for p in $(grep -hsE '^\\[program:' $(grep -lsE '^user=${site.user}$' /etc/supervisor/conf.d/*.conf) </dev/null | sed 's/\\[program:\\(.*\\)\\]/\\1/'); do fact daemon "$(supervisorctl status "$p:*" 2>/dev/null | awk '{print $1" "$2}' | tr '\\n' ';')"; done
+${(site.node ? nodeSlots(site, site.node.ports).slots : []).map((x) => `e=$(systemctl is-enabled ${x.unit} 2>/dev/null || true); a=$(systemctl is-active ${x.unit} 2>/dev/null || true); fact node_slot "${x.name} ${x.port} \${e:-none} \${a:-none} $(readlink ${q(x.link)} 2>/dev/null)"\n`).join("")}grep -hsE "^[^#].*[[:space:]]${site.user}[[:space:]]" /etc/crontab /etc/cron.d/* | while read -r l; do fact cron "$l"; done
 fact disk "$(du -sh /home/${site.user} 2>/dev/null | cut -f1)"
 true
 `;
@@ -311,13 +318,14 @@ defineCommand({
       db: site.db ?? null,
       tls: site.tlsIssuer,
       daemons: site.spec.daemons,
+      ...(site.node ? { node: { start: site.node.start, ports: site.node.ports, units: nodeSlots(site, site.node.ports).slots.map((x) => x.unit) } } : {}),
       redis: site.redis === "own" ? { instance: "own", socket: siteRedis(site.user).socket, unit: siteRedis(site.user).unit, maxmemory: site.spec.redis.maxmemory } : { instance: site.redis },
       schedule: site.spec.schedule,
       cron: site.spec.cron,
       deploy: site.spec.deploy,
       logs: {
         nginx: `fornax logs ${site.domain} nginx`,
-        laravel: `fornax logs ${site.domain} laravel`,
+        ...(site.node ? { app: `fornax logs ${site.domain} app` } : { laravel: `fornax logs ${site.domain} laravel` }),
         deploy: `fornax logs ${site.domain} deploy`,
       },
       notes: site.spec.notes ?? null,
@@ -338,6 +346,14 @@ defineCommand({
         fpm_socket: one(f, "socket") ?? null,
         daemon_configs: all(f, "daemon_conf"),
         daemons: all(f, "daemon").flatMap((d) => d.split(";").filter(Boolean)),
+        ...(site.node
+          ? {
+              node_slots: all(f, "node_slot").map((l) => {
+                const [slot, port, enabled, active, release] = l.split(" ");
+                return { slot, port: Number(port), enabled: enabled === "enabled", active, release: release || null };
+              }),
+            }
+          : {}),
         cron: all(f, "cron"),
         disk: one(f, "disk") ?? null,
       };

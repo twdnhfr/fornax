@@ -209,10 +209,48 @@ function validateServer(fleet: Fleet, server: Server): void {
       if (owner) fail("config_invalid", `${server.server}: sites "${owner}" and "${domain}" both use ${key}`, "set `db.name`/`db.user` on one of them");
       dbs.set(key, domain);
     }
-    if (!server.php.includes(site.php)) {
+    if (site.spec.preset === "node") validateNode(server, site);
+    else if (site.spec.node) fail("config_invalid", `${server.server}/${domain}: node: is for preset node (preset: ${site.spec.preset})`, "set `preset: node` or remove `node:`");
+    else if (!server.php.includes(site.php)) {
       fail("config_invalid", `${server.server}/${domain}: PHP ${site.php} is not installed on the server (php: ${server.php.join(", ")})`);
     }
   }
+  // a node app's two ports belong to it alone: no other app, proxy or the webhook listens there
+  const ports = new Map<number, string>([[server.webhook?.port ?? 9300, "the deploy webhook"]]);
+  const present = sites(fleet, server).filter((s) => s.spec.state === "present");
+  for (const s of present) for (const p of s.spec.proxies) ports.set(p.port, `the proxy ${p.domain}`);
+  for (const s of present.filter((s) => s.node)) {
+    for (const p of s.node!.ports) {
+      const other = ports.get(p);
+      if (other) fail("config_invalid", `${server.server}/${s.domain}: port ${p} (node.port and the one above it) is already used by ${other}`, "set another `node.port` on the site (it takes that port and the next)");
+      ports.set(p, `the node app of ${s.domain}`);
+    }
+  }
+}
+
+/** preset node: a start command, release deploys (two slots), and the runtime on the server. */
+function validateNode(server: Server, site: ResolvedSite): void {
+  const at = `${server.server}/${site.domain}`;
+  if (!site.node) fail("config_invalid", `${at}: preset node needs node.start, the command that starts the app`, 'e.g. node: { start: "bun run start" } or { start: "node .next/standalone/server.js" }');
+  if (site.inPlace) fail("config_invalid", `${at}: preset node deploys releases (a new process next to the old one); deploy.mode in_place is not possible`, "remove `deploy.mode: in_place`");
+  // the start command decides the runtime; build commands may need the other one as well
+  const commands = [site.node!.start, site.spec.deploy.commands ?? ""].join("\n");
+  const needs = new Set<"node" | "bun">([/^\s*bun\b/.test(site.node!.start) ? "bun" : "node"]);
+  if (/(^|[\s;&|(])bunx?\b/m.test(commands)) needs.add("bun");
+  if (/(^|[\s;&|(])(node|npm|npx)\b/m.test(commands)) needs.add("node");
+  for (const tool of needs) {
+    if (!server.tools.includes(tool)) fail("config_invalid", `${at}: preset node with "${site.node!.start}" needs ${tool} on the server (tools: ${server.tools.join(", ") || "none"})`, `add ${tool} to the server's tools`);
+  }
+}
+
+/** The two ports a node app switches between: node.port and the next, or a pair derived from the domain. */
+export function nodePorts(domain: string, port?: number): [number, number] {
+  if (port) return [port, port + 1];
+  // FNV-1a: the same domain always gets the same pair; a collision is reported by validateServer
+  let h = 0x811c9dc5;
+  for (const c of domain) h = Math.imul(h ^ c.charCodeAt(0), 0x01000193) >>> 0;
+  const p = 20000 + (h % 4000) * 2;
+  return [p, p + 1];
 }
 
 export function getServer(fleet: Fleet, name: string): Server {
@@ -255,6 +293,8 @@ export interface ResolvedSite {
   redis: "own" | "shared" | "none";
   /** Stable identifier used in file names (e.g. "shop-example-com"). */
   slug: string;
+  /** preset node: the start command and the two ports deploys switch between. */
+  node?: { start: string; ports: [number, number] };
 }
 
 export function defaultUser(domain: string): string {
@@ -283,9 +323,11 @@ export function resolveSite(fleet: Fleet, server: Server, domain: string): Resol
   const db = s.db
     ? { engine: s.db.engine, name: s.db.name ?? dbBase, user: s.db.user ?? dbBase, extensions: s.db.extensions, manage: s.db.manage }
     : undefined;
-  // sites taken over keep the shared Redis their .env points at; PHP sites get their own, static ones none
-  const redis = !server.services.includes("redis") ? "none" : (s.redis.instance ?? (s.adopted ? "shared" : s.preset === "static" ? "none" : "own"));
-  return { domain, spec: s, user, php, root, current, inPlace, webRoot, shared, names, certNames, tlsIssuer, db, redis, slug };
+  // sites taken over keep the shared Redis their .env points at; PHP sites get their own, static and
+  // node ones none (a node app opts in with redis.instance and points its .env at the socket)
+  const redis = !server.services.includes("redis") ? "none" : (s.redis.instance ?? (s.adopted ? "shared" : s.preset === "static" || s.preset === "node" ? "none" : "own"));
+  const node = s.preset === "node" && s.node ? { start: s.node.start.trim(), ports: nodePorts(domain, s.node.port) } : undefined;
+  return { domain, spec: s, user, php, root, current, inPlace, webRoot, shared, names, certNames, tlsIssuer, db, redis, slug, ...(node ? { node } : {}) };
 }
 
 /** The Redis server a site with its own instance runs (as the site user, reachable only by it). */

@@ -29,7 +29,7 @@ export const FileSchema = z
     message: "a file needs exactly one of source or content",
   });
 
-export const PRESETS = ["laravel", "php", "static"] as const;
+export const PRESETS = ["laravel", "php", "static", "node"] as const;
 
 export const DaemonSchema = z.strictObject({
   name: z.string().regex(/^[a-z0-9-]+$/).optional(),
@@ -73,6 +73,22 @@ export const SiteSchema = z.strictObject({
     .default([]),
   php: z.string().optional(),
   preset: z.enum(PRESETS).default("laravel"),
+  /**
+   * preset node: the app's own server, behind nginx. `start` runs in the release as the site user,
+   * with PORT, HOST and HOSTNAME (127.0.0.1) set — e.g. "bun run start" or "node
+   * .next/standalone/server.js". A deploy starts the new release on the other of two ports (`port`
+   * and port+1; default: derived from the domain, 20000–27999) and switches nginx once it answers.
+   */
+  node: z
+    .strictObject({
+      // written into a systemd ExecStart: no quotes, $, %, ; or other shell syntax
+      start: z
+        .string()
+        .regex(/^[\w ./=:@+,-]+$/, "a plain command: letters, digits, spaces and . / = : @ + , - _ only")
+        .refine((c) => c.trim() !== "" && !c.trim().startsWith("-"), "a command"),
+      port: z.number().int().min(1024).max(65534).optional(),
+    })
+    .optional(),
   /** Document root relative to the release. */
   web_dir: InsidePath.optional(),
   shared: z.array(InsidePath).optional(),
@@ -117,6 +133,7 @@ export const SiteSchema = z.strictObject({
   www_redirect: z.boolean().default(false),
   /** Names that only send visitors on to the site's domain (301, path kept) — e.g. another TLD of the brand. In the certificate. */
   redirects: z.array(Hostname).default([]),
+  /** Path a new release must answer (2xx/3xx) before and after it goes live; preset node checks "/" without it. */
   health_check: z.string().regex(/^\/?[\w./~@+%=&?-]*$/, "a URL path such as /up").optional(),
   deploy: z
     .strictObject({

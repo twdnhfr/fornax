@@ -1,0 +1,16 @@
+/* Source of style.css: `bun run ui:css` (Tailwind v4). Only the classes used in index.html and app.js end up in it. */
+@import "tailwindcss" source(none);
+@source "./index.html";
+@source "./app.js";
+
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@layer base {
+  /* the display utilities must not override the hidden attribute */
+  [hidden] {
+    display: none !important;
+  }
+}

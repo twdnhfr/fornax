@@ -173,7 +173,7 @@ defineCommand({
 
 // ---- logs ---------------------------------------------------------------------
 
-const LOG_KINDS = ["nginx", "access", "laravel", "daemon", "deploy", "php"] as const;
+export const LOG_KINDS = ["nginx", "access", "laravel", "daemon", "deploy", "php"] as const;
 
 function logScript(site: ResolvedSite, kind: string, lines: number, grep?: string): string {
   const filter = grep ? `| grep -E -- ${q(grep)}` : "";

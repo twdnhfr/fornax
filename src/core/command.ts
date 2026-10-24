@@ -1,3 +1,4 @@
+import YAML from "yaml";
 import { FornaxError, fail } from "./errors.ts";
 
 /**
@@ -40,6 +41,13 @@ export interface Result {
   human?: string;
   /** Exit code (default 0). Non-zero without throwing, e.g. "diff found changes". */
   exitCode?: number;
+}
+
+/** What a human sees of a result: its own rendering, else the data as YAML. */
+export function humanOutput(result: Result): string {
+  if (result.human !== undefined) return result.human;
+  if (result.data === undefined || result.data === null) return "";
+  return typeof result.data === "string" ? result.data : YAML.stringify(result.data);
 }
 
 export type Input = Record<string, unknown> & { _: string[] };

@@ -3,6 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p dist
+# the dashboard's stylesheet (Tailwind), embedded into the binaries below
+bun run --silent ui:css
 # baked into every binary: servers are only ever updated to a newer build, never downgraded
 build=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 for t in linux-arm64 linux-x64 darwin-arm64 darwin-x64; do

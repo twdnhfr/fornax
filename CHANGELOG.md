@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.0 — unreleased
+
+From this release on, fornax keeps what [compatibility](docs/compatibility.md) lists within 1.x: the config format, commands and options, `--json` output, error and exit codes, permission tiers and the layout on servers.
+
+- **`fornax server convert <server> --only <modules>`:** hands a server taken over from Forge to fornax module by module (base, access, security, web, php, data). It reads the server first and keeps what fornax would otherwise change unasked — time zone, reboot time, PHP's default version and php.ini, installed tools, ufw rules, Redis without a password, the CrowdSec bouncer already there — then switches the modules on; the plan afterwards shows only what fornax changes on purpose. `--dry-run` shows it without writing. Panel files that clash with fornax's own (a `conf.d/gzip.conf` setting what fornax's nginx.conf sets, an apt source of a repo fornax manages under another name, channel or mirror — two of those break every `apt update`) go into the new `retire` list. Tried on two production servers taken over from Forge.
+- **New server keys:** `php_ini` (php.ini settings over fornax's defaults), `retire` (taken-over files fornax's own replace, backed up by the apply), `firewall.allow` entries on a network interface (`on: tailscale0`).
+- **Only this machine:** memcached listens on 127.0.0.1 and ::1, like MySQL and Redis.
+- **Security review** of everything since 0.1.0, each finding checked by a second pass: ufw opens a server's own `ssh.port` (a per-server port was ignored — bootstrap would have locked SSH out); `public_ipv4`/`public_ipv6`, `ssh.user`, a site's `php` and `php_default` are validated (`php_default` must be one of the server's versions); `site check` runs openssl without a shell, keeps every request on the site's name and strips control characters from what servers send back; `site add` puts the server file back when the fleet refuses the site; repo detection reads https and local repos only; prerelease versions order correctly (rc.10 after rc.9).
+- **Release signing hardened:** the key is usable only from `v*` tags (a GitHub environment), signing runs in a job of its own after the build, actions are pinned by commit; manual dry runs stay unsigned.
+- **`docs/config.md` describes every key.**
+
 ## 0.2.0 — 2026-10-24
 
 - **Exit codes, frozen for 1.0:** 0 done and ok, 1 done but not ok (a result: `health` with a warning or worse, a failed deploy, `diff`/`dns status`/`env diff` with differences, …), 2 an error. `run` and `shell` keep the exit code of the command on the server and exit 255 on fornax's own errors, as ssh does. Before: errors exited 1 like results that were not ok, `health` exited 2 when critical, and `diff`, `dns status` and `env diff` exited 0 with differences.

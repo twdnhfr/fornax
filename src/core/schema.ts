@@ -456,6 +456,7 @@ export const ServerSchema = z.strictObject({
               proto: z.enum(["tcp", "udp"]).default("tcp"),
               /** Only from this address or network (e.g. 10.0.0.0/8); without it, from anywhere. */
               from: z.string().regex(/^[\da-fA-F.:/]+$/, "an address or network").optional(),
+              /** Everything (or `port`) arriving on this network interface, e.g. tailscale0. */
               on: z.string().regex(/^[\w.-]+$/, "a network interface such as tailscale0").optional(),
             })
             .refine((r) => r.port !== undefined || r.on !== undefined, "a port, an interface (on), or both"),

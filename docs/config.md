@@ -647,6 +647,8 @@ Only from this address or network (e.g. 10.0.0.0/8); without it, from anywhere.
 
 string (a network interface such as tailscale0) · optional
 
+Everything (or `port`) arriving on this network interface, e.g. tailscale0.
+
 ### `firewall.ssh_from`
 
 list of strings · default `["any"]`

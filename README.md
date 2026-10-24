@@ -44,7 +44,7 @@ plan 3f9c2a1e saved — review, then: fornax apply 3f9c2a1e
 - **Secure by default.** One Linux user per site, closed off from the others (own PHP pool, database user and Redis). Root only with a hardware key if you want it. Webhooks signed per site. No public SSH needed with Tailscale.
 - **No lock-in.** What fornax writes is ordinary nginx, PHP-FPM, supervisor, cron and certbot configuration. Stop using fornax tomorrow and every server keeps running exactly as it is. Any provider works — fornax only needs root SSH to Ubuntu.
 - **Built to be driven by an agent.** Non-interactive, `--json` everywhere, errors that name the command to run next, a permission tier on every command (`read`, `write`, `destroy`) and `fornax agent-context` to learn the whole tool in one call. A skill for Claude Code ships with it.
-- **Leave Laravel Forge without moving a site.** `fornax import forge` takes over a Forge server byte for byte — the first plan is empty — then hands one area after the other to fornax, and finally cuts Forge off.
+- **Leave Laravel Forge without moving a site.** `fornax import forge` takes over a Forge server byte for byte — the first plan is empty. `site convert` and `server convert` then hand one area after the other to fornax, keeping what the server has (time zone, php.ini, firewall rules) so that each plan shows only what fornax changes on purpose, and `detach forge` finally cuts Forge off.
 - **Batteries included.** Let's Encrypt, nightly encrypted backups with restore, push-to-deploy, queues and schedulers, per-site Redis, 1Password for every generated credential, ordering servers at Hetzner or DigitalOcean.
 
 ## How it works
@@ -77,7 +77,7 @@ plan 3f9c2a1e saved — review, then: fornax apply 3f9c2a1e
 | **Plan** | The difference between fleet and server, saved with an id. `apply <id>` runs exactly that — after you, or your agent, have read it. |
 | **Release** | One deploy of a site: `releases/<time>` next to `current`, with shared `storage/` and `.env`. The layout is Forge's, so taken-over sites keep working. |
 | **Secret reference** | Secrets never live in the fleet: `op://vault/item/field`, `env:NAME`, `file:path` or `keychain:service`, resolved only while applying. Credentials fornax creates go to 1Password by themselves. |
-| **Adopted** | A site or file taken over from Forge exactly as it is. `fornax site convert` hands it to fornax area by area. |
+| **Adopted** | A site, file or server taken over from Forge exactly as it is. `fornax site convert` and `fornax server convert` hand it to fornax area by area, module by module. |
 | **Tier** | Every command is `read`, `write` or `destroy`. Destroying needs `--confirm=<name>`; agents can be allowed the read tier only. |
 
 ## Install
@@ -85,7 +85,7 @@ plan 3f9c2a1e saved — review, then: fornax apply 3f9c2a1e
 Each [release](https://github.com/twdnhfr/fornax/releases) has an archive per machine — `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64` — with `SHA256SUMS` and its signature `SHA256SUMS.sig` (Ed25519, public key in [`release-key.pem`](release-key.pem)). An archive holds `fornax` and the two Linux builds it puts on servers; keep them together. The repository is private: downloads go through the GitHub CLI.
 
 ```bash
-v=0.1.0 t=darwin-arm64
+v=1.0.0 t=darwin-arm64
 gh release download "v$v" -R twdnhfr/fornax -p "fornax-$v-$t.tar.gz" -p SHA256SUMS -p SHA256SUMS.sig
 openssl pkeyutl -verify -pubin -inkey release-key.pem -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig && shasum -a 256 -c SHA256SUMS --ignore-missing
 mkdir -p ~/.local/lib/fornax ~/.local/bin && tar -xzf "fornax-$v-$t.tar.gz" -C ~/.local/lib/fornax
@@ -93,7 +93,7 @@ ln -sf ~/.local/lib/fornax/fornax ~/.local/bin/fornax   # or any other directory
 fornax --version
 ```
 
-Afterwards `fornax self-update` keeps it current: it installs the newest release only when its signature and checksum match, and a note on stderr says once a day when one is out (`FORNAX_NO_UPDATE_CHECK=1` turns it off). Servers get the new version with their next deploy or apply — never an older one than they run. A fleet can demand a minimum: `requires: ">=0.2.0"` in `fornax.yaml`.
+Afterwards `fornax self-update` keeps it current: it installs the newest release only when its signature and checksum match, and a note on stderr says once a day when one is out (`FORNAX_NO_UPDATE_CHECK=1` turns it off). Servers get the new version with their next deploy or apply — never an older one than they run. A fleet can demand a minimum: `requires: ">=1.0.0"` in `fornax.yaml`.
 
 A release also carries a Homebrew formula (`fornax.rb`) that installs the same archive. To run fornax from a checkout instead, see [CONTRIBUTING.md](CONTRIBUTING.md#building-and-running-from-source).
 
@@ -123,6 +123,7 @@ Or let fornax order the server: `fornax server create --size cax21 --location nb
 fornax import forge web-1 --org my-org --server-id 123456   # adopt everything as it is: the first plan is empty
 fornax site convert shop.example.com --only cron,logrotate,daemons   # then web, tls, deploy — plan + apply after each
 fornax detach forge web-1                                   # Forge's keys and firewall rules go
+fornax server convert web-1 --only base,security --dry-run  # then php, web, data, access — the server's own configuration
 ```
 
 A complete example fleet is in [`examples/fleet/`](examples/fleet/).
@@ -131,6 +132,7 @@ A complete example fleet is in [`examples/fleet/`](examples/fleet/).
 
 ```bash
 fornax health                         # every server and site at a glance
+fornax site check shop.example.com --body   # status codes, redirects, certificate, what the site answers
 fornax logs shop.example.com laravel  # nginx, access, laravel, daemon, deploy, php, app (node)
 fornax run shop.example.com -- php artisan migrate:status   # as the site's user, with its PHP
 fornax shell shop.example.com         # interactive, as the site's user
@@ -138,6 +140,7 @@ fornax deploy | rollback shop.example.com
 fornax backup restore shop.example.com                      # side by side, never over the live data by default
 fornax env pull | push shop.example.com
 fornax history web-1 --path nginx     # who changed what in /etc, and when
+fornax self-update                    # the newest release, signed
 ```
 
 ## Local dashboard
@@ -162,10 +165,10 @@ For humans who would rather click: the fleet at a glance, server status, health,
 | [History](docs/history.md) | `/etc` in git: how a server got to where it is |
 | [Local dashboard](docs/ui.md) | `fornax ui`: what it shows, how it is secured |
 | [Safety](docs/safety.md) | permission tiers, guard rails, agent setup |
-| [Compatibility](docs/compatibility.md) | what stays stable from 1.0: config, commands, JSON, error and exit codes, tiers, server layout |
+| [Compatibility](docs/compatibility.md) | what stays stable within 1.x: config, commands, JSON, error and exit codes, tiers, server layout |
 | [Security](SECURITY.md) | threat model and known limits |
 | [Development](docs/development.md) | tests, integration setup |
-| [Roadmap](docs/roadmap.md) | what is planned before and after 1.0, and what was decided against |
+| [Roadmap](docs/roadmap.md) | what is planned next, and what was decided against |
 
 ## Requirements
 
@@ -175,7 +178,7 @@ For humans who would rather click: the fleet at a glance, server status, health,
 
 ## Status
 
-fornax runs the author's production servers — taken over from Laravel Forge in October 2026 — and is tested end to end on throwaway VMs and real Hetzner servers. It is not 1.0 yet: the config format is versioned and upgrades are automatic (`fornax fleet upgrade`), but commands and output may still change. What 1.0 will promise is in [compatibility](docs/compatibility.md); see the [changelog](CHANGELOG.md).
+**1.0.** fornax runs the author's production servers — taken over from Laravel Forge in October 2026, sites and server configuration alike — and is tested end to end on throwaway VMs and real Hetzner servers, and by agents that were given nothing but the binary, a server and a repo. Within 1.x the config format, commands and options, `--json` output, error and exit codes, permission tiers and the layout on servers stay compatible ([compatibility](docs/compatibility.md)); releases are signed, and `fornax self-update` installs them. What changed is in the [changelog](CHANGELOG.md).
 
 ## Contributing
 

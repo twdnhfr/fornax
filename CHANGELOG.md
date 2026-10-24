@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 — unreleased
+## 1.0.0 — 2026-10-24
 
 From this release on, fornax keeps what [compatibility](docs/compatibility.md) lists within 1.x: the config format, commands and options, `--json` output, error and exit codes, permission tiers and the layout on servers.
 

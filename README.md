@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/fornax-logo.png" alt="fornax — a glowing forge furnace" width="320"></p>
+
 # fornax
 
 **Run your PHP and Laravel servers from a git repo — self-hosted, agent-first, no hosted dashboard.**

@@ -54,6 +54,7 @@ Without `--json` it goes to stderr as `error [<code>]: <message>`, followed by `
 | `no_fleet` | no `fornax.yaml` here, in a parent directory, in `$FORNAX_FLEET` or `~/.config/fornax/fleet` |
 | `config_invalid` | the fleet config is not valid, or contradicts the server (YAML, a field, two sites on one user, a PHP version the server lacks, …) |
 | `config_too_new` | the fleet was written by a newer fornax |
+| `fornax_too_old` | `requires` in `fornax.yaml` asks for a newer fornax: `fornax self-update` |
 | `config_conflict` | two parts of the config manage the same file |
 | `policy_violation`, `protected` | a policy in `fornax.yaml` forbids it (`allowed_repo_owners`, `protected`) |
 | `outside_maintenance_window` | server changes outside `policies.maintenance_window` |
@@ -63,6 +64,7 @@ Without `--json` it goes to stderr as `error [<code>]: <message>`, followed by `
 | `no_backup`, `no_dns`, `no_fleet_copy`, `no_notify`, `no_onepassword`, `no_preview_domain`, `no_tailscale_api`, `no_tailscale_key` | the fleet has no configuration for this feature yet |
 | `no_credentials`, `no_forge_token`, `no_github_token`, `no_ssh_key` | a credential the command needs is missing |
 | `no_repo`, `deploy_disabled`, `no_deploy_key`, `no_webhook`, `not_set_up` | the site is not set up for this (yet): plan + apply, or the config |
+| `no_release`, `github_failed`, `not_writable`, `signature_invalid`, `update_failed` | `self-update`: no such release, GitHub did not answer, the install directory is not writable, a download that is not signed with the release key (nothing is installed), an archive that cannot be unpacked |
 | `not_provisioned` | a plan of single sites on a server fornax has not set up yet: `fornax server provision` comes first |
 | `not_github` | `git connect` works with GitHub only; elsewhere add the key and the webhook by hand |
 | `no_env`, `no_local_env`, `no_key`, `no_history`, `no_logs`, `no_public_ip` | something the command reads does not exist (yet) |
@@ -130,7 +132,7 @@ Every command has a tier (`tier:` in its help, `tier` in `agent-context --json`)
 | Tier | Commands |
 | --- | --- |
 | `read` | `agent-context`, `server list`, `site list`, `server status`, `ssl status`, `logs`, `explain`, `tailnet status`, `health`, `secrets list`, `plan`, `diff`, `releases`, `git key`, `env pull`, `env diff`, `provider list`, `provider catalog`, `dns status`, `backup status`, `backup list`, `backup key`, `site check`, `history`, `fleet copies`, `ui` |
-| `write` | `init`, `fleet upgrade`, `server add`, `server set`, `site add`, `site set`, `site alias`, `tailnet sync`, `secrets setup`, `secrets sync`, `apply`, `server bootstrap`, `server provision`, `notify test`, `deploy`, `rollback`, `git connect`, `env push`, `server create`, `server rename`, `server snapshot`, `server rdns`, `dns sync`, `import forge`, `detach forge`, `backup run`, `backup restore`, `site convert`, `shell`, `run`, `fleet push`, `fleet restore` |
+| `write` | `self-update`, `init`, `fleet upgrade`, `server add`, `server set`, `site add`, `site set`, `site alias`, `tailnet sync`, `secrets setup`, `secrets sync`, `apply`, `server bootstrap`, `server provision`, `notify test`, `deploy`, `rollback`, `git connect`, `env push`, `server create`, `server rename`, `server snapshot`, `server rdns`, `dns sync`, `import forge`, `detach forge`, `backup run`, `backup restore`, `site convert`, `shell`, `run`, `fleet push`, `fleet restore` |
 | `destroy` | `site remove`, `server destroy`, `server reinstall` |
 
 Some write commands delete only in one variant, and then need a confirmation too: `apply` (and the commands that apply: `server bootstrap`, `server provision`, `server create`, `server rename`) when the plan deletes something (`--confirm=<server>`), `backup restore --replace` (`--confirm=<site>`).

@@ -80,15 +80,18 @@ plan 3f9c2a1e saved — review, then: fornax apply 3f9c2a1e
 
 ## Install
 
-Each [release](https://github.com/twdnhfr/fornax/releases) has an archive per machine — `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64` — and `SHA256SUMS`. An archive holds `fornax` and the two Linux builds it puts on servers; keep them together:
+Each [release](https://github.com/twdnhfr/fornax/releases) has an archive per machine — `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64` — with `SHA256SUMS` and its signature `SHA256SUMS.sig` (Ed25519, public key in [`release-key.pem`](release-key.pem)). An archive holds `fornax` and the two Linux builds it puts on servers; keep them together. The repository is private: downloads go through the GitHub CLI.
 
 ```bash
 v=0.1.0 t=darwin-arm64
-curl -fsSLO "https://github.com/twdnhfr/fornax/releases/download/v$v/fornax-$v-$t.tar.gz"
+gh release download "v$v" -R twdnhfr/fornax -p "fornax-$v-$t.tar.gz" -p SHA256SUMS -p SHA256SUMS.sig
+openssl pkeyutl -verify -pubin -inkey release-key.pem -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig && shasum -a 256 -c SHA256SUMS --ignore-missing
 mkdir -p ~/.local/lib/fornax ~/.local/bin && tar -xzf "fornax-$v-$t.tar.gz" -C ~/.local/lib/fornax
 ln -sf ~/.local/lib/fornax/fornax ~/.local/bin/fornax   # or any other directory on your PATH
 fornax --version
 ```
+
+Afterwards `fornax self-update` keeps it current: it installs the newest release only when its signature and checksum match, and a note on stderr says once a day when one is out (`FORNAX_NO_UPDATE_CHECK=1` turns it off). Servers get the new version with their next deploy or apply — never an older one than they run. A fleet can demand a minimum: `requires: ">=0.2.0"` in `fornax.yaml`.
 
 A release also carries a Homebrew formula (`fornax.rb`) that installs the same archive. To run fornax from a checkout instead, see [CONTRIBUTING.md](CONTRIBUTING.md#building-and-running-from-source).
 

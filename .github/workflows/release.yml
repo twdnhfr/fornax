@@ -41,6 +41,17 @@ jobs:
           v=$(bun -e 'console.log(require("./package.json").version)')
           bash scripts/homebrew.sh "$v" "${{ github.repository }}" dist/SHA256SUMS > dist/fornax.rb
 
+      # self-update installs only what this signature covers; a tag without the key is no release
+      - name: Sign the checksums
+        env:
+          FORNAX_RELEASE_KEY: ${{ secrets.FORNAX_RELEASE_KEY }}
+        run: |
+          if [ -z "$FORNAX_RELEASE_KEY" ]; then
+            [ "${{ github.ref_type }}" = tag ] && { echo "secret FORNAX_RELEASE_KEY is missing"; exit 1; }
+            echo "dry run without FORNAX_RELEASE_KEY: unsigned"; exit 0
+          fi
+          bun scripts/sign.ts dist/SHA256SUMS
+
       - name: Dry run result
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
@@ -49,6 +60,7 @@ jobs:
           path: |
             dist/*.tar.gz
             dist/SHA256SUMS
+            dist/SHA256SUMS.sig
             dist/fornax.rb
 
       - name: GitHub release
@@ -57,7 +69,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           notes=$(awk -v v="## ${GITHUB_REF_NAME#v}" 'index($0, v) == 1 {p = 1; next} /^## / && p {exit} p' CHANGELOG.md)
-          gh release create "$GITHUB_REF_NAME" dist/fornax-*.tar.gz dist/SHA256SUMS dist/fornax.rb \
+          gh release create "$GITHUB_REF_NAME" dist/fornax-*.tar.gz dist/SHA256SUMS dist/SHA256SUMS.sig dist/fornax.rb \
             --title "fornax ${GITHUB_REF_NAME#v}" --notes "${notes:-See CHANGELOG.md}" \
             $([[ "$GITHUB_REF_NAME" == *-* ]] && echo --prerelease)
 

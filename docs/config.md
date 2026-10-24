@@ -33,6 +33,12 @@ whole number, at least 1 · optional
 
 Config version (see core/config-version.ts); written by `fornax init` and `fornax fleet upgrade`.
 
+### `requires`
+
+string (a minimum version such as >=0.2.0) · optional
+
+The oldest fornax this fleet may be used with, e.g. ">=0.2.0": an older one refuses it (fornax_too_old) instead of acting on parts it does not know.
+
 ### `fleet`
 
 string · required

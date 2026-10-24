@@ -3,6 +3,7 @@ import { commands, describeCommand, GLOBAL_OPTIONS, helpText, humanOutput, jsonR
 import { asFornaxError, FornaxError } from "./core/errors.ts";
 import "./commands/index.ts";
 
+import { updateNotice } from "./core/update.ts";
 import { BUILD, VERSION } from "./core/version.ts";
 
 /**
@@ -127,6 +128,11 @@ export async function main(rawArgv: string[]): Promise<number> {
     };
     const result = await found!.def.run(input, ctx);
     print(result, ctx.json);
+    // once a day, after the work and only for a person at a terminal: a newer release is out
+    if (!ctx.json && process.stderr.isTTY && found!.def.name !== "self-update") {
+      const notice = updateNotice();
+      if (notice) process.stderr.write(`note: ${notice}\n`);
+    }
     return result.exitCode ?? 0;
   } catch (e) {
     const err = asFornaxError(e);

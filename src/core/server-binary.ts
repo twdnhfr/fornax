@@ -10,6 +10,7 @@ import type { Fleet } from "./fleet.ts";
 import type { Server } from "./schema.ts";
 import { q } from "./shell.ts";
 import { runnerFor } from "./ssh.ts";
+import { orderKey, VERSION } from "./version.ts";
 
 const BIN = "/usr/local/bin/fornax";
 const STAGING = "/var/tmp/fornax-staging";
@@ -27,13 +28,14 @@ if [ -x ${BIN} ]; then sha256sum ${BIN} | cut -c1-64; ${BIN} --version --json 2>
   if (!sha) return;
   const local = await remoteBinary(machine === "aarch64" ? "arm64" : "x86_64");
   if (sha === local.sha) return;
-  let remoteBuild: string | undefined;
+  let remote: { version?: string; build?: string | null } = {};
   try {
-    remoteBuild = (JSON.parse(version ?? "{}") as { build?: string }).build ?? undefined;
+    remote = JSON.parse(version ?? "{}");
   } catch {}
-  // ISO timestamps compare as strings; an unstamped server binary is always older
-  if (remoteBuild && (!local.build || remoteBuild > local.build)) {
-    log(`fornax on ${server.server} is newer (build ${remoteBuild}) than this one (${local.build ?? "unstamped"}) — left as it is`);
+  const remoteBuild = remote.build ?? undefined;
+  // the version first, then the build stamp (orderKey) — the same rule as the apply's probe
+  if (remote.version && orderKey(remote.version, remoteBuild) > orderKey(VERSION, local.build)) {
+    log(`fornax on ${server.server} is newer (${remote.version}${remoteBuild ? `, build ${remoteBuild}` : ""}) than this one (${VERSION}${local.build ? `, build ${local.build}` : ""}) — left as it is`);
     return;
   }
   const staged = `${STAGING}/${local.sha}`;
@@ -43,5 +45,5 @@ if [ -x ${BIN} ]; then sha256sum ${BIN} | cut -c1-64; ${BIN} --version --json 2>
   await runner.run(`[ "$(sha256sum ${q(staged)} | cut -c1-64)" = ${q(local.sha)} ] || { echo "upload of fornax to ${server.server} is corrupt" >&2; exit 1; }
 install -m 0755 ${q(staged)} ${BIN}.new && mv -f ${BIN}.new ${BIN} && rm -f ${q(staged)}
 systemctl try-restart fornax-hook.service 2>/dev/null || true`);
-  log(`updated fornax on ${server.server}: ${remoteBuild ?? "older build"} → ${local.build ?? local.sha.slice(0, 12)}`);
+  log(`updated fornax on ${server.server}: ${remote.version ?? "?"}${remoteBuild ? ` (${remoteBuild})` : ""} → ${VERSION}${local.build ? ` (${local.build})` : ""}`);
 }

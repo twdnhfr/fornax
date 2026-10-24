@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "ui:css": "tailwindcss -i src/ui/input.css -o src/ui/style.css --minify",
     "build": "bash scripts/build.sh",
-    "docs": "bun scripts/config-reference.ts"
+    "docs": "bun scripts/config-reference.ts",
+    "release": "bun scripts/release.ts"
   },
   "dependencies": {
     "yaml": "^2.9.1",

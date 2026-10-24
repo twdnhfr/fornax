@@ -115,12 +115,18 @@ describe("fornax on the server", async () => {
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   /** A stand-in for the server's binary that reports `build`; the probe's output for this build. */
-  const probe = (serverBuild: string | null, ours: string | undefined) => {
+  const { orderKey } = await import("../../src/core/version.ts");
+  const probe = (serverBuild: string | null, ours: string | undefined, serverVersion = "1.0.0", ourVersion = "1.0.0") => {
     const bin = join(mkdtempSync(join(tmpdir(), "fornax-bin-")), "fornax");
-    writeFileSync(bin, `#!/bin/sh\necho '${JSON.stringify({ version: "1.0.0", build: serverBuild })}'\n`);
+    writeFileSync(bin, `#!/bin/sh\necho '${JSON.stringify({ version: serverVersion, build: serverBuild })}'\n`);
     chmodSync(bin, 0o755);
-    return Bun.spawnSync(["sh", "-c", binaryProbe("ours-sha", ours, bin)]).stdout.toString().trim();
+    return Bun.spawnSync(["sh", "-c", binaryProbe("ours-sha", orderKey(ourVersion, ours), bin)]).stdout.toString().trim();
   };
+  test("the version decides before the build: a newer release replaces a later dev build, never the other way", () => {
+    expect(probe("2026-12-01T10:00:00Z", "2026-11-01T10:00:00Z", "0.2.0", "0.3.0")).toMatch(/^[0-9a-f]{64}$/);
+    expect(probe("2026-10-01T10:00:00Z", "2026-11-01T10:00:00Z", "0.10.0", "0.9.0")).toBe("ours-sha");
+    expect(probe("2026-10-01T10:00:00Z", "2026-11-01T10:00:00Z", "1.0.0", "1.0.0-rc.1")).toBe("ours-sha");
+  });
   test("apply never downgrades: a newer build on the server counts as in sync", () => {
     expect(probe("2026-11-02T10:00:00Z", "2026-11-01T10:00:00Z")).toBe("ours-sha");
   });

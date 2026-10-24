@@ -2,6 +2,7 @@ import type { ResolvedSite } from "../core/fleet.ts";
 import { absent, check, dir, file, service, symlink, type Resource } from "../core/resource.ts";
 import { DEPLOY_KEY, GITHUB_HOST_KEY, HOOK_SECRET_DIR, KNOWN_HOSTS, NTFY_TOKEN_FILE, REQUEST_DIR, RUNTIME_DIR, siteRuntime } from "../core/runtime.ts";
 import { asUser, q, sha256 } from "../core/shell.ts";
+import { ORDER_KEY_AWK, orderKey, VERSION } from "../core/version.ts";
 import { HEADER, prune, SECRETS, secretFile, type ModuleCtx } from "./common.ts";
 import { certFor, certPathsFor, programName } from "./site.ts";
 import { nginxSupport } from "./server.ts";
@@ -84,16 +85,17 @@ ${location}
 }
 
 /**
- * The probe of the server's fornax: its sha256 — or `sha` itself (in sync) when it is a newer build
- * than this one (`build`), so that an apply from an older fornax never downgrades it. Build stamps
- * are ISO times and compare as strings; a binary without one is older than any stamped build
- * (the same rule as ensureServerBinary).
+ * The probe of the server's fornax: its sha256 — or `sha` itself (in sync) when it is newer than
+ * this one (`order`, see orderKey: the version first, then the build stamp), so that an apply from
+ * an older fornax never downgrades it (the same rule as ensureServerBinary).
  */
-export function binaryProbe(sha: string, build: string | undefined, bin = "/usr/local/bin/fornax"): string {
-  const newer = build ? `[ "$b" != ${q(build)} ] && [ "$(printf '%s\\n%s\\n' "$b" ${q(build)} | LC_ALL=C sort | tail -n1)" = "$b" ]` : "true";
+export function binaryProbe(sha: string, order: string, bin = "/usr/local/bin/fornax"): string {
   return `if [ -x ${q(bin)} ]; then
-  b=$(${q(bin)} --version --json 2>/dev/null | sed -n 's/.*"build":"\\([^"]*\\)".*/\\1/p')
-  if [ -n "$b" ] && ${newer}; then echo ${q(sha)}; else sha256sum ${q(bin)} | cut -c1-64; fi
+  j=$(${q(bin)} --version --json 2>/dev/null)
+  v=$(printf '%s' "$j" | sed -n 's/.*"version":"\\([^"]*\\)".*/\\1/p')
+  b=$(printf '%s' "$j" | sed -n 's/.*"build":"\\([^"]*\\)".*/\\1/p')
+  k=$(printf '%s %s\\n' "$v" "$b" | ${ORDER_KEY_AWK})
+  if [ -n "$v" ] && [ "$k" != ${q(order)} ] && [ "$(printf '%s\\n%s\\n' "$k" ${q(order)} | LC_ALL=C sort | tail -n1)" = "$k" ]; then echo ${q(sha)}; else sha256sum ${q(bin)} | cut -c1-64; fi
 else echo missing; fi`;
 }
 
@@ -107,7 +109,7 @@ export function binaryResource(ctx: ModuleCtx): Resource | undefined {
     kind: "check",
     owner: "fornax",
     summary: `fornax binary on the server (${bin.sha.slice(0, 12)})`,
-    probe: binaryProbe(bin.sha, bin.build),
+    probe: binaryProbe(bin.sha, orderKey(VERSION, bin.build)),
     desired: bin.sha,
     apply: `install -m 0755 ${q(staged)} /usr/local/bin/fornax && rm -f ${q(staged)}`,
     handler: deploying(ctx).length ? "fornax-hook" : undefined,

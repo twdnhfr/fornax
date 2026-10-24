@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import YAML from "yaml";
 import type { z } from "zod";
 import { CONFIG_VERSION, upgradesFrom } from "./config-version.ts";
+import { compareVersions, VERSION } from "./version.ts";
 import { FornaxError, fail } from "./errors.ts";
 import { isIPv4, sslipDomain } from "./names.ts";
 import { notice } from "./notice.ts";
@@ -172,6 +173,8 @@ export function loadFleet(opts: { cwd: string; fleetDir?: string; tier?: "read" 
     notice(`note: this fleet config is version ${version}, fornax uses ${CONFIG_VERSION} — read as upgraded; \`fornax fleet upgrade\` writes it`);
   }
   const config = parseYaml(FleetSchema, file!, { version, kind: "fleet" });
+  const min = config.requires?.slice(2);
+  if (min && compareVersions(VERSION, min) < 0) fail("fornax_too_old", `this fleet needs fornax ${min} or newer (requires in fornax.yaml); this is ${VERSION}`, "update fornax first — an older one could act on parts of the config it does not know", "fornax self-update");
   const servers = new Map<string, Server>();
   const files = new Map<string, string>();
   const serverDir = join(dir!, "servers");

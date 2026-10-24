@@ -299,6 +299,8 @@ export const ServerSchema = z.strictObject({
 export const FleetSchema = z.strictObject({
   /** Config version (see core/config-version.ts); written by `fornax init` and `fornax fleet upgrade`. */
   version: z.number().int().min(1).optional(),
+  /** The oldest fornax this fleet may be used with, e.g. ">=0.2.0": an older one refuses it (fornax_too_old) instead of acting on parts it does not know. */
+  requires: z.string().regex(/^>=\d+\.\d+\.\d+(-[\w.]+)?$/, "a minimum version such as >=0.2.0").optional(),
   fleet: z.string(),
   /**
    * A domain of yours whose subdomains reach the fleet's servers (a wildcard record, or `fornax dns

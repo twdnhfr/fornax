@@ -1,22 +1,29 @@
 name: Release
 
-# Push a tag v<version> (matching package.json and src/core/version.ts): tests, binaries for
-# macOS and Linux, checksums, the filled-in Homebrew formula — all attached to a GitHub release.
-# Run it by hand ("Run workflow") for a dry run: everything but the release, the result as an artifact.
+# Push a tag v<version> (matching package.json and src/core/version.ts; `bun run release <version>`
+# does it): tests, binaries for macOS and Linux, checksums, the filled-in Homebrew formula, the
+# signature — all attached to a GitHub release. Run it by hand ("Run workflow") for a dry run: the
+# build job's result as an artifact, unsigned.
+#
+# Two jobs: the build (dependencies, tests, compiler) never sees the release key; signing and
+# publishing run in the environment "release", which only v* tags may use. Actions are pinned by
+# commit (the tag they were taken from in the comment).
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
@@ -41,30 +48,42 @@ jobs:
           v=$(bun -e 'console.log(require("./package.json").version)')
           bash scripts/homebrew.sh "$v" "${{ github.repository }}" dist/SHA256SUMS > dist/fornax.rb
 
-      # self-update installs only what this signature covers; a tag without the key is no release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ github.ref_type == 'tag' && 'fornax-dist' || 'fornax-dry-run' }}
+          path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+            dist/fornax.rb
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: fornax-dist
+          path: dist
+
+      # self-update installs only what this signature covers (no dependencies needed: node:crypto only)
       - name: Sign the checksums
         env:
           FORNAX_RELEASE_KEY: ${{ secrets.FORNAX_RELEASE_KEY }}
         run: |
-          if [ -z "$FORNAX_RELEASE_KEY" ]; then
-            [ "${{ github.ref_type }}" = tag ] && { echo "secret FORNAX_RELEASE_KEY is missing"; exit 1; }
-            echo "dry run without FORNAX_RELEASE_KEY: unsigned"; exit 0
-          fi
+          [ -n "$FORNAX_RELEASE_KEY" ] || { echo "secret FORNAX_RELEASE_KEY is missing in the environment release"; exit 1; }
           bun scripts/sign.ts dist/SHA256SUMS
 
-      - name: Dry run result
-        if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
-        with:
-          name: fornax-dry-run
-          path: |
-            dist/*.tar.gz
-            dist/SHA256SUMS
-            dist/SHA256SUMS.sig
-            dist/fornax.rb
-
       - name: GitHub release
-        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -75,7 +94,7 @@ jobs:
 
       # optional: keep a tap repo (owner/homebrew-fornax) current — needs a token that may push there
       - name: Update the Homebrew tap
-        if: github.ref_type == 'tag' && vars.HOMEBREW_TAP != ''
+        if: vars.HOMEBREW_TAP != ''
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |

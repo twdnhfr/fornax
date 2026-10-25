@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.3 — unreleased
+
+- **A forwarded agent counts when it holds any key that may log in as root** (`ssh.root_keys`), not only the one `ssh.security_key` names — e.g. a key a phone's SSH app keeps in its secure enclave and forwards.
+
 ## 1.1.2 — 2026-10-25
 
 - **A security key forwarded to the machine fornax runs on** (`ssh -A` from where it is plugged in, e.g. a phone or laptop into a box at home) is used when its agent holds the key of `ssh.security_key`; before, fornax tried the key handle there, which has no key behind it.

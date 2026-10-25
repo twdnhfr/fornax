@@ -133,7 +133,7 @@ export function sshOptions(fleet: Fleet, server: Server, agent?: string): string
   if (sk) args.push("-i", sk);
   // the security key reached this machine through a forwarded agent (ssh -A from where it is plugged
   // in): sign with that one — the key handle here has no key behind it
-  const forwarded = sk ? forwardedAgentFor(sk) : undefined;
+  const forwarded = sk ? forwardedAgentFor(sk, rootKeys(fleet, server)) : undefined;
   if (forwarded) args.push("-o", `IdentityAgent=${forwarded}`);
   else if (agent) args.push("-o", `IdentityAgent=${agent}`);
   else if (c.identity_file) args.push("-i", rel(c.identity_file), "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none");
@@ -144,15 +144,28 @@ export function sshOptions(fleet: Fleet, server: Server, agent?: string): string
 
 const forwardedCache = new Map<string, string | undefined>();
 
-/** $SSH_AUTH_SOCK when that agent holds the security key whose handle is `sk` (its .pub next to it). */
-export function forwardedAgentFor(sk: string): string | undefined {
+/** The key bodies (type and key) that may log in as root on a server: ssh.root_keys of the fleet and the server. */
+const rootKeys = (fleet: Fleet, server: Server): string[] =>
+  [...(fleet.config.ssh.root_keys ?? []), ...(server.ssh?.root_keys ?? [])].map(keyBody).filter(Boolean);
+
+const keyBody = (line: string) => {
+  const parts = line.trim().split(/\s+/);
+  const i = parts.findIndex((p) => /^(ssh-|sk-|ecdsa-)/.test(p));
+  return i < 0 ? "" : parts.slice(i, i + 2).join(" ");
+};
+
+/**
+ * $SSH_AUTH_SOCK when that agent holds the security key whose handle is `sk` (its .pub next to it),
+ * or another key that may log in as root (`roots`) — e.g. one a phone's SSH app made on the key.
+ */
+export function forwardedAgentFor(sk: string, roots: string[] = []): string | undefined {
   const sock = process.env.SSH_AUTH_SOCK;
-  if (!sock || !existsSync(`${sk}.pub`)) return undefined;
-  const key = `${sock}|${sk}`;
+  if (!sock) return undefined;
+  const wanted = new Set([...roots, ...(existsSync(`${sk}.pub`) ? [keyBody(readFileSync(`${sk}.pub`, "utf8"))] : [])].filter(Boolean));
+  const key = `${sock}|${[...wanted].sort().join(",")}`;
   if (!forwardedCache.has(key)) {
-    const pub = readFileSync(`${sk}.pub`, "utf8").trim().split(/\s+/).slice(0, 2).join(" ");
     const listed = Bun.spawnSync(["ssh-add", "-L"], { env: { ...process.env, SSH_AUTH_SOCK: sock }, stdout: "pipe", stderr: "ignore" });
-    const held = listed.exitCode === 0 && listed.stdout.toString().split("\n").some((l) => l.trim().split(/\s+/).slice(0, 2).join(" ") === pub);
+    const held = listed.exitCode === 0 && listed.stdout.toString().split("\n").some((l) => wanted.has(keyBody(l)));
     forwardedCache.set(key, held ? sock : undefined);
   }
   return forwardedCache.get(key);

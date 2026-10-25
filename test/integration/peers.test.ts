@@ -126,6 +126,8 @@ describe("peers on three servers", () => {
     const st = await fornax("peers", "status", "--json");
     expect(st.json.peers.map((p: any) => p.state)).toEqual(["same", "same", "same"]);
     expect(ssh("p2", "git -C /var/lib/fornax/fleet rev-parse HEAD").trim()).toBe(git("rev-parse", "HEAD"));
+    // the repo's setup leaves /var/lib/fornax open for the webhook and ACME below it
+    expect(ssh("p2", "stat -c %a /var/lib/fornax").trim()).toBe("755");
   });
 
   test("fornax --on runs on a peer: a plan of another server, and of itself (over loopback)", async () => {

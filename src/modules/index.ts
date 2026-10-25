@@ -8,9 +8,13 @@ import { rootAccessResources } from "./root-access.ts";
 import { parseFacts, one, FACT_FN } from "../core/probe.ts";
 import { pendingHandlers, type Resource } from "../core/resource.ts";
 import { MODULES, type Server } from "../core/schema.ts";
-import { runnerFor } from "../core/ssh.ts";
+import { peerHost, runnerFor } from "../core/ssh.ts";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { remoteBinary } from "../core/binary.ts";
-import { peerHost } from "../core/ssh.ts";
+import { downloadRelease } from "../core/update.ts";
+import { VERSION } from "../core/version.ts";
 import { notice } from "../core/notice.ts";
 import { DISTROS, SUPPORTED_UBUNTU, type ModuleCtx } from "./common.ts";
 import { SERVER_MODULES, serverFiles, serverRetire } from "./server.ts";
@@ -51,6 +55,27 @@ async function binaryFor(arch: "arm64" | "x86_64", current: string | undefined, 
     return await remoteBinary(arch);
   } catch (e) {
     if (!peerHost() || (e as { code?: string }).code !== "binary_missing") throw e;
+    // the signed release of this host's version, for the other architecture (checked like self-update does)
+    const plat = `linux-${arch === "arm64" ? "arm64" : "x64"}`;
+    const cache = join("/var/lib/fornax/releases", `${VERSION}-${plat}`);
+    try {
+      if (!existsSync(join(cache, "fornax"))) {
+        const tmp = mkdtempSync(join(tmpdir(), "fornax-release-"));
+        try {
+          const x = downloadRelease(VERSION, plat, tmp, (l) => notice(l));
+          mkdirSync(dirname(cache), { recursive: true, mode: 0o700 });
+          renameSync(x, cache);
+        } finally {
+          rmSync(tmp, { recursive: true, force: true });
+        }
+      }
+      const path = join(cache, "fornax");
+      const sha = new Bun.CryptoHasher("sha256").update(await Bun.file(path).arrayBuffer()).digest("hex");
+      const build = existsSync(join(cache, "fornax.build")) ? readFileSync(join(cache, "fornax.build"), "utf8").trim() || undefined : undefined;
+      return { path, sha, build };
+    } catch (d) {
+      notice(`note: release v${VERSION} for ${plat} not available (${(d as Error).message})`);
+    }
     if (!current) fail("binary_missing", `${name} has no fornax yet, and this host has no build for ${arch}`, "apply it once from your machine, or from a host of the same architecture");
     notice(`note: no ${arch} build of fornax on this host — the one on ${name} stays as it is`);
     return { path: "", sha: current!, keep: true };

@@ -21,7 +21,9 @@ exec /usr/local/bin/fornax peers receive
 export function peerRepoScript(server: string): string {
   return `set -e
 d=${PEER_DIR}
-install -d -m 0700 -o root -g root /var/lib/fornax "$d"
+# /var/lib/fornax itself stays as the server module keeps it (0755: the webhook and ACME live below it)
+[ -d /var/lib/fornax ] || install -d -m 0755 -o root -g root /var/lib/fornax
+install -d -m 0700 -o root -g root "$d"
 [ -d "$d/.git" ] || git init -q -b main "$d"
 c() { git -C "$d" config "$@"; }
 c receive.denyCurrentBranch updateInstead

@@ -70,9 +70,30 @@ export function installRelease(version: string, dir: string, log: (l: string) =>
   } catch {
     fail("not_writable", `${dir} is not writable for this user`, "update as the user that installed fornax (or with sudo), or reinstall it to a directory of yours");
   }
-  const asset = `fornax-${version}-${platform()}.tar.gz`;
   const tmp = mkdtempSync(join(tmpdir(), "fornax-update-"));
   try {
+    const x = downloadRelease(version, platform(), tmp, log);
+    const files = readdirSync(x).filter((f) => !f.startsWith("."));
+    for (const f of [...files.filter((f) => f !== "fornax"), "fornax"]) {
+      const target = join(dir, f);
+      copyFileSync(join(x, f), `${target}.new`);
+      chmodSync(`${target}.new`, statSync(join(x, f)).mode & 0o777 || (f.endsWith(".build") ? 0o644 : 0o755));
+      renameSync(`${target}.new`, target);
+    }
+    return files;
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Download a release for a platform ("linux-x64", "darwin-arm64" …) into `tmp`, check SHA256SUMS
+ * against the release key and the archive against SHA256SUMS, and unpack it: returns the directory
+ * holding its files (the binary `fornax`, its `.build`). Throws when anything does not hold.
+ */
+export function downloadRelease(version: string, plat: string, tmp: string, log: (l: string) => void): string {
+  const asset = `fornax-${version}-${plat}.tar.gz`;
+  {
     log(`downloading ${asset} from ${RELEASE_REPO} …`);
     // over HTTPS like any download; the GitHub CLI only when that fails (a private repo). Trust comes from the signature, not the channel.
     const base = `https://github.com/${RELEASE_REPO}/releases/download/v${version}`;
@@ -88,17 +109,8 @@ export function installRelease(version: string, dir: string, log: (l: string) =>
     mkdirSync(x);
     const tar = Bun.spawnSync(["tar", "-xzf", join(tmp, asset), "-C", x], { stderr: "pipe" });
     if (tar.exitCode !== 0) fail("update_failed", `could not unpack ${asset}: ${tar.stderr.toString().trim()}`);
-    const files = readdirSync(x).filter((f) => !f.startsWith("."));
-    if (!files.includes("fornax")) fail("update_failed", `${asset} holds no fornax binary`);
-    for (const f of [...files.filter((f) => f !== "fornax"), "fornax"]) {
-      const target = join(dir, f);
-      copyFileSync(join(x, f), `${target}.new`);
-      chmodSync(`${target}.new`, statSync(join(x, f)).mode & 0o777 || (f.endsWith(".build") ? 0o644 : 0o755));
-      renameSync(`${target}.new`, target);
-    }
-    return files;
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    if (!readdirSync(x).includes("fornax")) fail("update_failed", `${asset} holds no fornax binary`);
+    return x;
   }
 }
 

@@ -174,3 +174,12 @@ describe("--on", () => {
     expect(() => splitOn(["--on"])).toThrow(FornaxError);
   });
 });
+
+describe("the fleet repo on a server", () => {
+  test("its setup leaves /var/lib/fornax as the server module keeps it (the webhook and ACME live below it)", async () => {
+    const { peerRepoScript } = await import("../../src/modules/peers.ts");
+    const script = peerRepoScript("web-1");
+    expect(script).not.toMatch(/install -d -m 0700[^\n]*\/var\/lib\/fornax(\s|$)/m);
+    expect(script).toContain('install -d -m 0700 -o root -g root "$d"');
+  });
+});

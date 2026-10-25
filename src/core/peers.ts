@@ -14,6 +14,9 @@ import { dirname, join } from "node:path";
 import YAML from "yaml";
 import { fail } from "./errors.ts";
 
+/** The line `peers host-run` ends a run's output with; `fornax --on` answers it with "ack". */
+export const RUN_DONE = "@@fornax-run-done";
+
 /** git's namespace for commit signatures (ssh-keygen -Y … -n git). */
 const NAMESPACE = "git";
 
@@ -67,23 +70,34 @@ export function signersAt(repo: string, commit: string): string[] {
   }
 }
 
-/** What the trust of the fleet rests on at a commit: the signers and every root key. */
-export function trustAt(repo: string, commit: string): { signers: string[]; rootKeys: string[] } {
-  const keys: string[] = [];
-  const read = (path: string) => {
+/**
+ * What the trust of the fleet rests on at a commit: who signs (peers), how fornax logs in and where
+ * to (ssh, a server's host), and where secrets and providers come from. A commit that changes any of
+ * it — an option that runs a command when ssh starts, a host that points elsewhere, a new signer —
+ * is a trust change: never taken over without being looked at (syncPeers, acceptTrust).
+ */
+export function trustAt(repo: string, commit: string): { signers: string[]; fleet: string; servers: string } {
+  const pick = (doc: Record<string, unknown> | null, keys: string[]) => Object.fromEntries(keys.map((k) => [k, doc?.[k] ?? null]));
+  const read = (path: string): Record<string, unknown> | null => {
     const r = git(repo, "show", `${commit}:${path}`);
-    if (r.code !== 0) return;
+    if (r.code !== 0) return null;
     try {
-      const doc = YAML.parse(r.stdout) as { ssh?: { root_keys?: unknown; authorized_keys?: unknown } } | null;
-      for (const k of [doc?.ssh?.root_keys, doc?.ssh?.authorized_keys]) if (Array.isArray(k)) keys.push(...k.map(String));
+      return YAML.parse(r.stdout) as Record<string, unknown> | null;
     } catch {
-      /* an unreadable file is the schema's business, not this check's */
+      // unreadable now: compared as text, so any change to it still counts
+      return { unparsed: r.stdout };
     }
   };
-  read("fornax.yaml");
-  for (const f of git(repo, "ls-tree", "--name-only", commit, "servers/").stdout.split("\n").filter((f) => /\.ya?ml$/.test(f))) read(f);
-  return { signers: signersAt(repo, commit), rootKeys: keys.sort() };
+  const fleet = pick(read("fornax.yaml"), ["ssh", "peers", "onepassword", "fleet_copy", "provider_credentials", "tailscale", "access", "unparsed"]);
+  const servers: Record<string, unknown> = {};
+  for (const f of git(repo, "ls-tree", "--name-only", commit, "servers/").stdout.split("\n").filter((f) => /\.ya?ml$/.test(f))) {
+    servers[f] = pick(read(f), ["server", "host", "ssh", "firewall", "unparsed"]);
+  }
+  return { signers: signersAt(repo, commit), fleet: stable(fleet), servers: stable(servers) };
 }
+
+/** JSON with sorted keys: equal content, equal text. */
+const stable = (v: unknown): string => JSON.stringify(v, (_, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x));
 
 /** Key fingerprint (SHA256:…) of a public key line. */
 export function fingerprint(key: string): string {
@@ -98,7 +112,7 @@ export interface CommitCheck {
   /** The signer whose key verified it (its comment, else its fingerprint). */
   signer?: string;
   reason?: string;
-  /** The commit changes peers.signers or a root key: the plan and the approval show it apart. */
+  /** The commit changes what trust rests on (trustAt): signers, logins, hosts, secret sources. */
   trustChange: boolean;
 }
 

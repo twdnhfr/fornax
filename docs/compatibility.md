@@ -86,7 +86,8 @@ Without `--json` it goes to stderr as `error [<code>]: <message>`, followed by `
 | `fleet_copy_failed`, `no_copy`, `not_empty`, `missing_tool` | storing or restoring a fleet copy failed |
 | `unsigned_fleet`, `not_a_signer`, `fleet_rollback`, `no_trust_anchor`, `no_signers`, `unknown_commit`, `git_failed` | peers: a commit in the fleet repo is not signed by one of the signers its parent names, a history does not descend from the last trusted state, no trusted state is pinned on this machine yet (`fornax peers trust`), or git failed |
 | `fleet_diverged`, `peer_push_failed`, `peer_push_refused`, `peer_dirty` | peers: two copies of the fleet repo went different ways (fornax never merges), a push to a server failed or its hook refused it, or the copy on a host has uncommitted changes |
-| `no_peers`, `not_a_host`, `no_forwarded_agent`, `unknown_run` | `--on`: peers are not enabled, the server is not one of `peers.hosts`, no agent reached the host (run it with `fornax --on`), or there is no such run to attach to |
+| `no_peers`, `not_a_host`, `no_forwarded_agent`, `unknown_run`, `not_on_a_host` | `--on`: peers are not enabled, the server is not one of `peers.hosts`, no agent reached the host (run it with `fornax --on`), there is no such run to attach to, or the command keeps secrets where it runs (`env pull`) |
+| `trust_change_pending` | commits from a server change what trust rests on (signers, logins, hosts, secret sources): look at them, then `fornax peers sync --accept-trust-changes` |
 | `not_supported` | the provider cannot do this through its API (the hint names its panel) |
 | `provider_auth`, `provider_error`, `provider_not_found`, `provider_timeout`, `provider_unreachable` | the provider's (or Tailscale's) API refused, failed or did not answer |
 | `create_incomplete`, `rename_incomplete` | `server create` / `server rename` stopped half way; the message says what exists already |
@@ -150,7 +151,7 @@ These paths and names keep their meaning within 1.x. Should one ever have to mov
 | `/usr/local/bin/fornax` | fornax itself (on servers that deploy or back up) |
 | `/usr/local/sbin/fornax-trigger` | the one command the webhook may run via sudo |
 | `/etc/fornax/` | what fornax keeps on the server: deploy config per site (`sites/<domain>.json`), webhook secrets (`hook-secrets/`), generated secrets (`secrets/`, root only), certificates (`tls/<domain>/`), Redis configs (`redis/`), the backup config (`backup/`), pinned host keys (`known_hosts`) |
-| `/var/lib/fornax/` | state: deploy requests, backup status and staging, restores, the fleet copy, ACME challenges; with peers the fleet repo (`fleet/`), runs started with `--on` (`runs/`) and the other servers' host keys (`peers_known_hosts`) |
+| `/var/lib/fornax/` | state: deploy requests, backup status and staging, restores, the fleet copy, ACME challenges; with peers the fleet repo (`fleet/`) and runs started with `--on` until their output was delivered (`runs/`) |
 | `/var/log/fornax/` | the script of every apply, with its output |
 | `/var/log/fornax-sites/<user>/` | a site's daemon logs, and its deploy logs under `deploys/` |
 | `/home/<user>/<domain>/` | the site: `releases/<YYYYMMDDHHMMSS>/`, `current` → the live release, `.env`, `auth.json` and the shared paths (e.g. `storage`) linked into each release. With `deploy.mode: in_place` the directory is the checkout itself. |

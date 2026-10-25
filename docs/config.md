@@ -447,6 +447,12 @@ list of strings · optional
 
 The servers that may act as host (default: all of them).
 
+### `peers.service_account`
+
+string · optional
+
+Secret reference of the 1Password service-account token `fornax --on` hands a host for its run (default: onepassword.service_account). A host that is broken into while it runs can read it: give hosts a service account of their own, limited to what plans and applies need.
+
 ### `server_binary`
 
 one of `"auto"`, `"manual"` · default `"auto"`

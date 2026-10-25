@@ -816,6 +816,12 @@ export const FleetSchema = z.strictObject({
       signers: z.array(SignerKey).min(1),
       /** The servers that may act as host (default: all of them). */
       hosts: z.array(z.string()).optional(),
+      /**
+       * Secret reference of the 1Password service-account token `fornax --on` hands a host for its
+       * run (default: onepassword.service_account). A host that is broken into while it runs can read
+       * it: give hosts a service account of their own, limited to what plans and applies need.
+       */
+      service_account: z.string().optional(),
     })
     .optional(),
   /**

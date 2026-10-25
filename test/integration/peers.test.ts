@@ -31,7 +31,7 @@ Bun.spawnSync(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "laptop", "-
 const laptopPub = readFileSync(join(work, "laptop.pub"), "utf8").trim();
 const devPub = readFileSync(`${KEY}.pub`, "utf8").trim();
 writeFileSync(join(work, "gitconfig"), `[user]\n  name = peers test\n  email = peers@test.invalid\n  signingkey = ${join(work, "laptop")}\n[gpg]\n  format = ssh\n[gpg "ssh"]\n  program = ssh-keygen\n[commit]\n  gpgsign = true\n[init]\n  defaultBranch = main\n`);
-const env = { ...process.env, GIT_CONFIG_GLOBAL: join(work, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1", FORNAX_PEERS_STATE: join(work, "peers.json"), FORNAX_NO_UPDATE_CHECK: "1", SSH_AUTH_SOCK: "" };
+const env = { ...process.env, GIT_CONFIG_GLOBAL: join(work, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1", FORNAX_PEERS_STATE: join(work, "peers.json"), FORNAX_NO_UPDATE_CHECK: "1", SSH_AUTH_SOCK: "", FORNAX_FORWARD_NO_CONFIRM: "1" };
 
 function git(...args: string[]) {
   const p = Bun.spawnSync(["git", "-C", fleet, ...args], { env, stdout: "pipe", stderr: "pipe" });
@@ -138,6 +138,33 @@ describe("peers on three servers", () => {
     expect(self.json.in_sync).toBe(true);
   });
 
+  test("a run leaves no connection open on the host", () => {
+    expect(ssh("p1", "ls -A /run/fornax/cm 2>/dev/null | wc -l").trim()).toBe("0");
+    expect(ssh("p1", "pgrep -fc 'ssh.*ControlPath=/run/fornax/cm' || true").trim()).toBe("0");
+    expect(ssh("p1", "ls -A /var/lib/fornax/runs 2>/dev/null | wc -l").trim()).toBe("0");
+  });
+
+  test("a trust change a host commits is held back until it is accepted", async () => {
+    const before = git("rev-parse", "HEAD");
+    const r = await fornax("--on", "p2", "server", "set", "p3", "--ssh-port", "2222", "--json");
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("not taken over");
+    expect(git("rev-parse", "HEAD")).toBe(before);
+    const s = await fornax("peers", "sync", "--json");
+    expect(s.code).toBe(2);
+    expect(s.json.code).toBe("trust_change_pending");
+    const a = await fornax("peers", "sync", "--accept-trust-changes", "--json");
+    expect(git("rev-parse", "HEAD")).not.toBe(before);
+    expect(readFileSync(join(fleet, "servers", "p3.yaml"), "utf8")).toContain("2222");
+    expect(a.json.peers.find((p: any) => p.server === "p1").state).toBe("same");
+    // back to port 22, from this machine: its own commits need no acceptance
+    const set = await fornax("server", "set", "p3", "--ssh-port", "22", "--json");
+    expect(set.code).toBe(0);
+    git("commit", "-q", "-am", "p3 back on port 22");
+    const back = await fornax("peers", "sync", "--json");
+    expect(back.code).toBe(0);
+  });
+
   test("a change made on a host is committed there, signed through the forwarded agent, and comes back checked", async () => {
     const before = git("rev-parse", "HEAD");
     const r = await fornax("--on", "p2", "server", "set", "p3", "--public-ipv4", "192.0.2.33", "--json");
@@ -152,6 +179,8 @@ describe("peers on three servers", () => {
   });
 
   test("a run goes on when the connection drops; peers attach picks it up", async () => {
+    // every session on p2 takes 4 s after login: the drop below comes while the run still works
+    ssh("p2", "echo 'sleep 4' > /etc/ssh/sshrc");
     const p = Bun.spawn(["bun", join(ROOT, "src", "cli.ts"), "--on", "p1", "plan", "p2", "--json"], { cwd: fleet, env, stdout: "pipe", stderr: "pipe" });
     let id = "";
     const reader = p.stderr.getReader();
@@ -170,8 +199,11 @@ describe("peers on three servers", () => {
     p.kill(9);
     await p.exited;
     const r = await fornax("--on", "p1", "peers", "attach", id);
+    ssh("p2", "rm -f /etc/ssh/sshrc");
     expect(r.code).toBe(0);
     expect(r.json.in_sync).toBe(true);
+    // delivered now: nothing of it stays on the host
+    expect(ssh("p1", "ls -A /var/lib/fornax/runs | wc -l").trim()).toBe("0");
   });
 
   test("a peer's hook refuses an unsigned push", () => {

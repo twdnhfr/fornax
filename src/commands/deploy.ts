@@ -8,7 +8,7 @@ import { DEPLOY_KEY, DEPLOY_LOG_DIR, HOOK_SECRET_DIR, REQUEST_DIR, repoUrl } fro
 import type { Server } from "../core/schema.ts";
 import { ensureServerBinary } from "../core/server-binary.ts";
 import { asUser, b64, q } from "../core/shell.ts";
-import { runnerFor, tail } from "../core/ssh.ts";
+import { peerHost, runnerFor, tail } from "../core/ssh.ts";
 import { GitHub, sameKey } from "../githost/github.ts";
 import { serve } from "../remote/hook.ts";
 import { isProvisioned } from "../modules/index.ts";
@@ -356,6 +356,8 @@ defineCommand({
   tier: "read",
   args: [{ name: "site", help: "site domain", required: true }],
   async run(input, ctx) {
+    // on a peer host the copy would stay on that server, outside the site it belongs to
+    if (peerHost()) fail("not_on_a_host", "env pull keeps a copy of a site's .env where fornax runs — on a peer host that is another server", "run it on your own machine");
     const fleet = loadFleet(ctx);
     const { server, site } = findSite(fleet, String(input.site));
     const text = await readEnv(fleet, server, site);

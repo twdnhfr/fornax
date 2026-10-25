@@ -64,13 +64,15 @@ export interface SyncResult {
   checked: CommitCheck[];
   /** This machine's repo moved forward to `head`. */
   fastForwarded: boolean;
+  /** Commits from a server that change what trust rests on: not taken over without --accept-trust-changes. */
+  pendingTrust: CommitCheck[];
 }
 
 /**
  * Bring this machine and the peers to the newest signed head. `push: false` only looks (and still
  * fast-forwards nothing): what `fornax peers status` shows.
  */
-export async function syncPeers(fleet: Fleet, o: { push: boolean; servers?: Server[]; log: (l: string) => void }): Promise<SyncResult> {
+export async function syncPeers(fleet: Fleet, o: { push: boolean; acceptTrust?: boolean; servers?: Server[]; log: (l: string) => void }): Promise<SyncResult> {
   const name = fleet.config.fleet;
   const trust = needTrust(name);
   const dir = fleet.dir;
@@ -121,6 +123,18 @@ export async function syncPeers(fleet: Fleet, o: { push: boolean; servers?: Serv
   // the commits new to this machine (head was accepted above; local is an ancestor of it)
   const from = isAncestor(dir, trust.head, local) ? local : trust.head;
   const checks = isAncestor(dir, head, trust.head) ? [] : assertVerified(dir, from, head);
+  // a commit that came from a server and changes signers, logins, hosts or secret sources is never
+  // taken over on its own: a host you ran something on could have had it signed with your key
+  const pendingTrust = checks.filter((c) => c.trustChange);
+  if (pendingTrust.length && o.push && !o.acceptTrust) {
+    fail(
+      "trust_change_pending",
+      `${pendingTrust.length} commit(s) from a server change what trust rests on (signers, logins, hosts, secret sources): ${pendingTrust.map((c) => `${c.commit.slice(0, 12)} "${c.subject}" (signed by ${c.signer})`).join("; ")}`,
+      `look at them first: git -C ${dir} log -p ${local.slice(0, 12)}..${head.slice(0, 12)} — then take them over with --accept-trust-changes`,
+      "fornax peers sync --accept-trust-changes",
+      { checks },
+    );
+  }
 
   // only a sync moves anything: status looks
   let fastForwarded = false;
@@ -139,11 +153,12 @@ export async function syncPeers(fleet: Fleet, o: { push: boolean; servers?: Serv
       try {
         await pushPeer(fleet, servers.find((s) => s.server === p.server)!, head);
         p.pushed = true;
+        p.state = "same";
       } catch (e) {
         p.pushed = false;
         p.reason = (e as Error).message;
       }
     }
   }
-  return { head, peers, checked: checks, fastForwarded };
+  return { head, peers, checked: checks, fastForwarded, pendingTrust };
 }

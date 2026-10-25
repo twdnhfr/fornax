@@ -15,7 +15,9 @@ fornax peers status                   # every server's copy: head, signatures, b
 
 - A host reaches root on another server, and on itself, only through the **SSH agent your machine forwards** for that one run. Servers hold no keys to each other, so breaking into one server gives no way onto the next. `fornax --on` starts an agent of its own with the key fornax logs in with (a security key asks for its PIN and a touch as usual) and closes every connection the host opened when the run ends.
 - **No commit is trusted because of where it lies.** Every commit must be signed by one of `peers.signers`, and it is checked against the signers of the commit **before** it. A key that a commit adds cannot sign that same commit, and a removed key stops counting from the commit that removes it. A server is never a signer: commits made on a host are signed with your key through the forwarded agent.
-- **No secrets at rest.** The 1Password service-account token travels to the host on stdin for the one run and is never written to its disk.
+- **Only the login key travels, and every use of it is yours.** `fornax --on` forwards an agent of its own that holds only the key fornax logs in with — never your personal agent. A security key needs its touch for every signature anyway; a key file or `ssh.key` is added with confirmation, so every use on the host asks you first.
+- **What a host commits that touches trust waits for you.** A host you run something on could have your key sign more than you meant. So a commit coming from a server that changes signers, how fornax logs in (`ssh`), a server's `host` or `firewall`, or where secrets and providers come from is never taken over on its own: `fornax --on` says so, and `fornax peers sync --accept-trust-changes` takes it after you looked at it (`git log -p`). Your own commits made on your machine need no such step.
+- **No secrets at rest, and the host knows nobody new.** The 1Password service-account token travels to the host on stdin for the one run and is never written to its disk. Give hosts a service account of their own, limited to what plans and applies need (`peers.service_account`): a host broken into while it runs could read the token. The host checks every server it connects to against the host keys your machine knows (sent along with the run) and refuses any other. Connections the run opened are closed when it ends; nothing stays open on the host.
 - **No rollback.** Your machine remembers the last state it trusted (`~/.config/fornax/peers.json`, like `known_hosts`). A server whose history does not descend from that state is refused, so a server cannot slip back an older state, for example one from before a key was removed.
 
 ## Setting it up
@@ -44,7 +46,7 @@ fornax peers status                   # every server's copy: head, signatures, b
 | `fornax peers trust [commit]` | pin the commit trust starts from (default `HEAD`) |
 | `fornax peers verify [rev]` | check every commit since the trusted state; when they all hold, move the trusted state forward |
 | `fornax peers status` | each server's head: `in sync`, `behind`, `empty`, `not set up`, `unreachable`, or `REFUSED` (a commit there is not signed by a signer) |
-| `fornax peers sync` | bring your machine and every server to the newest signed state. It only fast-forwards; two histories that went different ways stop it (`fleet_diverged`) |
+| `fornax peers sync` | bring your machine and every server to the newest signed state. It only fast-forwards; two histories that went different ways stop it (`fleet_diverged`). Commits from a server that change trust wait for `--accept-trust-changes` |
 | `fornax --on <server> peers attach <run>` | follow a run after the connection dropped |
 
 ## A host and its own network
@@ -53,10 +55,12 @@ A run on a host goes on when the connection to it drops: the host starts the com
 
 Your key goes away with the connection: connections the run had already opened go on, but one it would open after the drop fails. An apply opens its connection when it starts, so it finishes.
 
+A run's output stays on the host only until it was delivered: `fornax --on` confirms it got it, and the host removes the run. A run nobody attached to is removed after a week. `env pull` refuses to run on a host — the copy of the `.env` would stay on that server. Commit messages a host writes name the command, not its options.
+
 ## On the server
 
 | | |
 | --- | --- |
 | `/var/lib/fornax/fleet/` | the fleet repo (root, 0700). Fast-forwards only, and its `pre-receive` hook refuses commits that are not signed by a signer |
-| `/var/lib/fornax/runs/<run>/` | a run started with `fornax --on`: its command, output and exit code |
-| `/var/lib/fornax/peers_known_hosts` | the host keys of the other servers, as this host met them |
+| `/var/lib/fornax/runs/<run>/` | a run started with `fornax --on`, until its output was delivered: command words, output, exit code, the host keys sent along |
+| `/run/fornax/cm/<run>/` | the run's connections to servers, closed when it ends |

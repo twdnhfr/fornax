@@ -1,3 +1,4 @@
+import { readdirSync, rmSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { fail } from "./errors.ts";
 import { secret, type Fleet } from "./fleet.ts";
@@ -55,7 +56,11 @@ export function sshEnv(fleet: Fleet): Record<string, string | undefined> | undef
  */
 export const peerHost = () => process.env.FORNAX_PEER_HOST === "1";
 
-const PEER_CM = "/run/fornax/cm";
+/**
+ * Where a host keeps this run's connections: a directory per run (host-run closes every one in it
+ * when the run ends), and the host keys the client sent for this run.
+ */
+const peerRun = () => ({ cm: process.env.FORNAX_PEER_CM ?? "/run/fornax/cm/adhoc", knownHosts: process.env.FORNAX_PEER_KNOWN_HOSTS });
 const peerMasters = new Set<string>();
 let peerCleanup = false;
 
@@ -63,17 +68,21 @@ function peerSshOptions(fleet: Fleet, server: Server): { options: string[]; host
   const agent = process.env.SSH_AUTH_SOCK;
   if (!agent) fail("no_forwarded_agent", "no SSH agent was forwarded to this host", "run it from your machine with `fornax --on <server> …` (it forwards your agent), or ssh -A");
   const c = fleet.config.ssh;
+  const run = peerRun();
   const self = process.env.FORNAX_PEER_SELF === server.server;
   // the host itself over loopback: a change to its firewall or the tailnet cannot cut that line
   const host = self ? "127.0.0.1" : server.host;
-  const options = ["-F", "/dev/null", "-o", "BatchMode=yes", "-o", `IdentityAgent=${agent}`, "-o", "IdentitiesOnly=no", "-o", "ControlMaster=auto", "-o", `ControlPath=${PEER_CM}/%C`, "-o", "ControlPersist=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=30"];
+  // only the forwarded agent logs in (IdentityFile=none: no key lying in root's ~/.ssh), and only to
+  // servers whose host keys the client knows (StrictHostKeyChecking=yes); connections live at most
+  // ten minutes past their last use, and host-run closes them all when the run ends
+  const options = ["-F", "/dev/null", "-o", "BatchMode=yes", "-o", `IdentityAgent=${agent}`, "-o", "IdentityFile=none", "-o", "IdentitiesOnly=no", "-o", "ControlMaster=auto", "-o", `ControlPath=${run.cm}/%C`, "-o", "ControlPersist=10m", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=30"];
+  if (run.knownHosts) options.push("-o", "StrictHostKeyChecking=yes", "-o", `UserKnownHostsFile=${run.knownHosts}`);
+  else options.push("-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=/var/lib/fornax/peers_known_hosts");
   if (self) options.push("-o", `HostKeyAlias=${server.host}`);
-  // the host's own record of the other servers' keys: ssh.known_hosts_file is a path on your machine
-  options.push("-o", "UserKnownHostsFile=/var/lib/fornax/peers_known_hosts");
   for (const [k, v] of Object.entries(c.options)) options.push("-o", `${k}=${v}`);
   if (!peerCleanup) {
     peerCleanup = true;
-    Bun.spawnSync(["install", "-d", "-m", "0700", PEER_CM]);
+    Bun.spawnSync(["install", "-d", "-m", "0700", run.cm]);
     process.once("exit", () => {
       for (const m of peerMasters) {
         const { options: o, target: t } = JSON.parse(m) as { options: string[]; target: string[] };
@@ -82,6 +91,18 @@ function peerSshOptions(fleet: Fleet, server: Server): { options: string[]; host
     });
   }
   return { options, host };
+}
+
+/** Close every connection a run left in its directory (host-run, after the run — however it ended). */
+export function closePeerConnections(dir: string): void {
+  let sockets: string[] = [];
+  try {
+    sockets = readdirSync(dir).map((f) => join(dir, f));
+  } catch {
+    return;
+  }
+  for (const sock of sockets) Bun.spawnSync(["ssh", "-F", "/dev/null", "-o", `ControlPath=${sock}`, "-O", "exit", "fornax-peer"], { stdout: "ignore", stderr: "ignore" });
+  rmSync(dir, { recursive: true, force: true });
 }
 
 /**

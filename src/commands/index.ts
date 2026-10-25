@@ -16,3 +16,4 @@ import "./shell.ts";
 import "./fleet-copy.ts";
 import "./ui.ts";
 import "./update.ts";
+import "./peers.ts";

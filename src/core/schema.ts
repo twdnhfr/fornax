@@ -14,6 +14,8 @@ const InsidePath = PlainPath.refine((p) => !p.startsWith("/") && !p.split("/").i
 /** One line: cron and supervisor read a newline as a new entry. */
 const Line = z.string().regex(/^[^\n\r\0]*$/, "a single line");
 const Name = z.string().regex(/^[\w.-]+$/, "letters, digits and . - _ only");
+/** A public key without options: key type, key, comment (a commit signer, see `peers.signers`). */
+const SignerKey = z.string().regex(/^(ssh-(ed25519|rsa)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com|ecdsa-sha2-nistp\d+) [A-Za-z0-9+/=]+( [^\n]*)?$/, "an OpenSSH public key line (type, key, comment)");
 /** One authorized_keys line: options (optional), key type, key, comment. */
 const AuthorizedKey = z.string().regex(/^([a-z-]+(="[^"\n]*")?(,[a-z-]+(="[^"\n]*")?)* )?(ssh-(ed25519|rsa)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com|ecdsa-sha2-nistp\d+) [A-Za-z0-9+/=]+( [^\n]*)?$/, "an OpenSSH public key line");
 
@@ -794,6 +796,26 @@ export const FleetSchema = z.strictObject({
     .strictObject({
       /** age public keys (age1…) the copy is encrypted to; any one of their identities decrypts it. */
       recipients: z.array(z.string().regex(/^age1[a-z0-9]+$/, "an age recipient (age1…)")).min(1),
+    })
+    .optional(),
+  /**
+   * Every server a host (peers.ts, docs/peers.md): the fleet repo lies on every server as plain git,
+   * and plan and apply run on any of them over an SSH agent forwarded from your machine. A host
+   * accepts a commit only when one of `signers` signed it, checked against the signers of the
+   * commit before it.
+   */
+  peers: z
+    .strictObject({
+      /** Off by default: on, apply puts the fleet repo on every server and `fornax --on <server>` runs there. */
+      enabled: z.boolean().default(false),
+      /**
+       * Public keys whose commit signatures the fleet repo accepts (git's SSH signing). They are keys
+       * a person holds (a laptop's agent, a phone's secure enclave, a hardware key) and never a
+       * server's. A change to this list takes effect from the next commit on.
+       */
+      signers: z.array(SignerKey).min(1),
+      /** The servers that may act as host (default: all of them). */
+      hosts: z.array(z.string()).optional(),
     })
     .optional(),
   /**

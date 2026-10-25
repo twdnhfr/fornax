@@ -423,6 +423,30 @@ list of strings (an age recipient (age1…)), at least 1 entry · required
 
 age public keys (age1…) the copy is encrypted to; any one of their identities decrypts it.
 
+### `peers`
+
+object · optional
+
+Every server a host (peers.ts, docs/peers.md): the fleet repo lies on every server as plain git, and plan and apply run on any of them over an SSH agent forwarded from your machine. A host accepts a commit only when one of `signers` signed it, checked against the signers of the commit before it.
+
+### `peers.enabled`
+
+boolean · default `false`
+
+Off by default: on, apply puts the fleet repo on every server and `fornax --on <server>` runs there.
+
+### `peers.signers`
+
+list of strings (an OpenSSH public key line (type, key, comment)), at least 1 entry · required
+
+Public keys whose commit signatures the fleet repo accepts (git's SSH signing). They are keys a person holds (a laptop's agent, a phone's secure enclave, a hardware key) and never a server's. A change to this list takes effect from the next commit on.
+
+### `peers.hosts`
+
+list of strings · optional
+
+The servers that may act as host (default: all of them).
+
 ### `server_binary`
 
 one of `"auto"`, `"manual"` · default `"auto"`

@@ -84,6 +84,7 @@ Without `--json` it goes to stderr as `error [<code>]: <message>`, followed by `
 | `deploy_failed`, `rollback_failed`, `notify_failed`, `hook_unreachable` | a deploy left no result, a rollback or test notification failed, the webhook did not answer (a deploy that fails is a result with exit code 1, not an error) |
 | `backup_failed`, `restore_failed`, `backup_error` | a backup or restore failed (`backup_error`: on the server) |
 | `fleet_copy_failed`, `no_copy`, `not_empty`, `missing_tool` | storing or restoring a fleet copy failed |
+| `unsigned_fleet`, `not_a_signer`, `fleet_rollback`, `no_trust_anchor`, `no_signers`, `unknown_commit`, `git_failed` | peers: a commit in the fleet repo is not signed by one of the signers its parent names, a history does not descend from the last trusted state, no trusted state is pinned on this machine yet (`fornax peers trust`), or git failed |
 | `not_supported` | the provider cannot do this through its API (the hint names its panel) |
 | `provider_auth`, `provider_error`, `provider_not_found`, `provider_timeout`, `provider_unreachable` | the provider's (or Tailscale's) API refused, failed or did not answer |
 | `create_incomplete`, `rename_incomplete` | `server create` / `server rename` stopped half way; the message says what exists already |
@@ -132,8 +133,8 @@ Every command has a tier (`tier:` in its help, `tier` in `agent-context --json`)
 
 | Tier | Commands |
 | --- | --- |
-| `read` | `agent-context`, `server list`, `site list`, `server status`, `ssl status`, `logs`, `explain`, `tailnet status`, `health`, `secrets list`, `plan`, `diff`, `releases`, `git key`, `env pull`, `env diff`, `provider list`, `provider catalog`, `dns status`, `backup status`, `backup list`, `backup key`, `site check`, `history`, `fleet copies`, `ui` |
-| `write` | `self-update`, `init`, `server convert`, `fleet upgrade`, `server add`, `server set`, `site add`, `site set`, `site alias`, `tailnet sync`, `secrets setup`, `secrets sync`, `apply`, `server bootstrap`, `server provision`, `notify test`, `deploy`, `rollback`, `git connect`, `env push`, `server create`, `server rename`, `server snapshot`, `server rdns`, `dns sync`, `import forge`, `detach forge`, `backup run`, `backup restore`, `site convert`, `shell`, `run`, `fleet push`, `fleet restore` |
+| `read` | `agent-context`, `server list`, `site list`, `server status`, `ssl status`, `logs`, `explain`, `tailnet status`, `health`, `secrets list`, `plan`, `diff`, `releases`, `git key`, `env pull`, `env diff`, `provider list`, `provider catalog`, `dns status`, `backup status`, `backup list`, `backup key`, `site check`, `history`, `fleet copies`, `peers verify`, `ui` |
+| `write` | `self-update`, `init`, `server convert`, `fleet upgrade`, `server add`, `server set`, `site add`, `site set`, `site alias`, `tailnet sync`, `secrets setup`, `secrets sync`, `apply`, `server bootstrap`, `server provision`, `notify test`, `deploy`, `rollback`, `git connect`, `env push`, `server create`, `server rename`, `server snapshot`, `server rdns`, `dns sync`, `import forge`, `detach forge`, `backup run`, `backup restore`, `site convert`, `shell`, `run`, `fleet push`, `fleet restore`, `peers trust` |
 | `destroy` | `site remove`, `server destroy`, `server reinstall` |
 
 Some write commands delete only in one variant, and then need a confirmation too: `apply` (and the commands that apply: `server bootstrap`, `server provision`, `server create`, `server rename`) when the plan deletes something (`--confirm=<server>`), `backup restore --replace` (`--confirm=<site>`).

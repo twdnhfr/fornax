@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.2 — unreleased
+
+- **A security key forwarded to the machine fornax runs on** (`ssh -A` from where it is plugged in, e.g. a phone or laptop into a box at home) is used when its agent holds the key of `ssh.security_key`; before, fornax tried the key handle there, which has no key behind it.
+
 ## 1.1.1 — 2026-10-25
 
 - **Peers:** the build a host downloads for a server of another architecture now carries its build time, so it updates an older fornax there instead of counting as older itself.

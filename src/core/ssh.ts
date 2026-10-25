@@ -1,4 +1,4 @@
-import { readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { fail } from "./errors.ts";
 import { secret, type Fleet } from "./fleet.ts";
@@ -131,11 +131,31 @@ export function sshOptions(fleet: Fleet, server: Server, agent?: string): string
   ];
   if (c.config_file) args.push("-F", c.config_file === "none" ? "/dev/null" : rel(c.config_file));
   if (sk) args.push("-i", sk);
-  if (agent) args.push("-o", `IdentityAgent=${agent}`);
+  // the security key reached this machine through a forwarded agent (ssh -A from where it is plugged
+  // in): sign with that one — the key handle here has no key behind it
+  const forwarded = sk ? forwardedAgentFor(sk) : undefined;
+  if (forwarded) args.push("-o", `IdentityAgent=${forwarded}`);
+  else if (agent) args.push("-o", `IdentityAgent=${agent}`);
   else if (c.identity_file) args.push("-i", rel(c.identity_file), "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none");
   if (c.known_hosts_file) args.push("-o", `UserKnownHostsFile=${rel(c.known_hosts_file)}`);
   for (const [k, v] of Object.entries(c.options)) args.push("-o", `${k}=${v}`);
   return args;
+}
+
+const forwardedCache = new Map<string, string | undefined>();
+
+/** $SSH_AUTH_SOCK when that agent holds the security key whose handle is `sk` (its .pub next to it). */
+export function forwardedAgentFor(sk: string): string | undefined {
+  const sock = process.env.SSH_AUTH_SOCK;
+  if (!sock || !existsSync(`${sk}.pub`)) return undefined;
+  const key = `${sock}|${sk}`;
+  if (!forwardedCache.has(key)) {
+    const pub = readFileSync(`${sk}.pub`, "utf8").trim().split(/\s+/).slice(0, 2).join(" ");
+    const listed = Bun.spawnSync(["ssh-add", "-L"], { env: { ...process.env, SSH_AUTH_SOCK: sock }, stdout: "pipe", stderr: "ignore" });
+    const held = listed.exitCode === 0 && listed.stdout.toString().split("\n").some((l) => l.trim().split(/\s+/).slice(0, 2).join(" ") === pub);
+    forwardedCache.set(key, held ? sock : undefined);
+  }
+  return forwardedCache.get(key);
 }
 
 /** The host ssh connects to: on a peer host, the host itself over loopback. */

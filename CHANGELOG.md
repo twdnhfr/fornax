@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.4 — unreleased
+
+- **A forwarded root key is offered even when `~/.ssh/config` sets `IdentitiesOnly yes`** for the server: fornax names it as a public key file, ahead of the local key handle. Tested from a phone (Termius, a Face ID key in the secure enclave) through a box at home.
+
 ## 1.1.3 — 2026-10-25
 
 - **A forwarded agent counts when it holds any key that may log in as root** (`ssh.root_keys`), not only the one `ssh.security_key` names — e.g. a key a phone's SSH app keeps in its secure enclave and forwards.

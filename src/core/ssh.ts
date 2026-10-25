@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { fail } from "./errors.ts";
 import { secret, type Fleet } from "./fleet.ts";
@@ -130,19 +131,20 @@ export function sshOptions(fleet: Fleet, server: Server, agent?: string): string
     "ServerAliveInterval=30",
   ];
   if (c.config_file) args.push("-F", c.config_file === "none" ? "/dev/null" : rel(c.config_file));
-  if (sk) args.push("-i", sk);
-  // the security key reached this machine through a forwarded agent (ssh -A from where it is plugged
-  // in): sign with that one — the key handle here has no key behind it
+  // a key that may log in as root reached this machine through a forwarded agent (ssh -A from the
+  // device that holds it): sign with that one — named as a public key file, so an IdentitiesOnly
+  // in ~/.ssh/config cannot leave it out, and before the key handle here, which has no key behind it
   const forwarded = sk ? forwardedAgentFor(sk, rootKeys(fleet, server)) : undefined;
-  if (forwarded) args.push("-o", `IdentityAgent=${forwarded}`);
-  else if (agent) args.push("-o", `IdentityAgent=${agent}`);
-  else if (c.identity_file) args.push("-i", rel(c.identity_file), "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none");
+  if (forwarded) args.push("-i", forwarded.pubFile, "-o", `IdentityAgent=${forwarded.sock}`);
+  if (sk) args.push("-i", sk);
+  if (!forwarded && agent) args.push("-o", `IdentityAgent=${agent}`);
+  else if (!forwarded && c.identity_file) args.push("-i", rel(c.identity_file), "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none");
   if (c.known_hosts_file) args.push("-o", `UserKnownHostsFile=${rel(c.known_hosts_file)}`);
   for (const [k, v] of Object.entries(c.options)) args.push("-o", `${k}=${v}`);
   return args;
 }
 
-const forwardedCache = new Map<string, string | undefined>();
+const forwardedCache = new Map<string, { sock: string; pubFile: string } | undefined>();
 
 /** The key bodies (type and key) that may log in as root on a server: ssh.root_keys of the fleet and the server. */
 const rootKeys = (fleet: Fleet, server: Server): string[] =>
@@ -158,15 +160,24 @@ const keyBody = (line: string) => {
  * $SSH_AUTH_SOCK when that agent holds the security key whose handle is `sk` (its .pub next to it),
  * or another key that may log in as root (`roots`) — e.g. one a phone's SSH app made on the key.
  */
-export function forwardedAgentFor(sk: string, roots: string[] = []): string | undefined {
+export function forwardedAgentFor(sk: string, roots: string[] = []): { sock: string; pubFile: string } | undefined {
   const sock = process.env.SSH_AUTH_SOCK;
   if (!sock) return undefined;
   const wanted = new Set([...roots, ...(existsSync(`${sk}.pub`) ? [keyBody(readFileSync(`${sk}.pub`, "utf8"))] : [])].filter(Boolean));
   const key = `${sock}|${[...wanted].sort().join(",")}`;
   if (!forwardedCache.has(key)) {
     const listed = Bun.spawnSync(["ssh-add", "-L"], { env: { ...process.env, SSH_AUTH_SOCK: sock }, stdout: "pipe", stderr: "ignore" });
-    const held = listed.exitCode === 0 && listed.stdout.toString().split("\n").some((l) => wanted.has(keyBody(l)));
-    forwardedCache.set(key, held ? sock : undefined);
+    const held = listed.exitCode === 0 ? listed.stdout.toString().split("\n").find((l) => wanted.has(keyBody(l))) : undefined;
+    let found: { sock: string; pubFile: string } | undefined;
+    if (held) {
+      // ssh signs through the agent for a public key file whose key the agent holds
+      const dir = mkdtempSync(join(tmpdir(), "fornax-fwd-"));
+      const pubFile = join(dir, "forwarded.pub");
+      writeFileSync(pubFile, held.trim() + "\n", { mode: 0o600 });
+      process.once("exit", () => rmSync(dir, { recursive: true, force: true }));
+      found = { sock, pubFile };
+    }
+    forwardedCache.set(key, found);
   }
   return forwardedCache.get(key);
 }

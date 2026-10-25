@@ -34,7 +34,10 @@ fornax peers status                   # every server's copy: head, signatures, b
    ```
 
 3. **Pin where trust starts** on your machine, after you have looked at the history: `fornax peers trust`. Do this on every machine you run fornax from.
-4. **Plan and apply each server.** The apply installs git and fornax there, creates the repo at `/var/lib/fornax/fleet`, and passes the fleet on. `fornax peers sync` does that at any time.
+4. **Plan and apply each server.** The apply installs git, fornax and — when the fleet keeps its secrets in 1Password — the 1Password CLI (from 1Password's signed apt repository; no token or login stays on the server), creates the repo at `/var/lib/fornax/fleet`, and passes the fleet on. `fornax peers sync` does that at any time.
+5. **Let the servers reach each other's SSH.** With `access: tailscale`, `fornax tailnet sync` adds a rule for that (servers to servers, the SSH port only). With `access: ssh`, the firewall's `ssh_from` must let the other servers in. Root there still needs the key you forward.
+
+A host applies its own build of fornax to servers of its architecture. For a server of the other one it downloads the signed release of its version from GitHub (checked like `self-update`); if there is none, the server's fornax stays as it is.
 
 **Everything in the repo's history ends up on every server**, unencrypted (root only). The fleet config holds no secrets, only references such as `op://…`. Keep notes, to-do lists and anything else you would not leave on a server out of the fleet repo, including its history.
 

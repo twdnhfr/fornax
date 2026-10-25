@@ -75,7 +75,7 @@ export interface AptRepo {
   key: string;
   /** Key is already binary (no `gpg --dearmor`). */
   binaryKey?: boolean;
-  line: (keyring: string, codename: string) => string;
+  line: (keyring: string, codename: string, arch: "amd64" | "arm64") => string;
 }
 
 export const REPOS: Record<string, AptRepo> = {
@@ -105,6 +105,12 @@ export const REPOS: Record<string, AptRepo> = {
     // the distribution-independent channel: works on new Ubuntu releases from day one
     line: (k) => `deb [signed-by=${k}] https://packagecloud.io/crowdsec/crowdsec/any/ any main`,
   },
+  // the 1Password CLI, for peers: a host reads the fleet's secrets with the token its client hands it per run
+  onepassword: {
+    name: "1password",
+    key: "https://downloads.1password.com/linux/keys/1password.asc",
+    line: (k, _c, a) => `deb [arch=${a} signed-by=${k}] https://downloads.1password.com/linux/debian/${a} stable main`,
+  },
   tailscale: {
     name: "tailscale",
     key: "https://pkgs.tailscale.com/stable/ubuntu/{codename}.noarmor.gpg",
@@ -121,7 +127,7 @@ export function aptRepo(ctx: ModuleCtx, repo: AptRepo, owner: string): Resource[
     : `curl -fsSL ${q(keyUrl)} | gpg --dearmor --yes -o ${q(keyring)}`;
   return [
     check(`apt-key:${repo.name}`, `apt key for ${repo.name}`, `[ -s ${q(keyring)} ]`, `install -d -m 0755 /etc/apt/keyrings; ${fetch}; chmod 0644 ${q(keyring)}`, { owner, handler: "apt" }),
-    file(`/etc/apt/sources.list.d/${repo.name}.list`, `# ${HEADER}\n${repo.line(keyring, ctx.facts.codename)}\n`, { owner }),
+    file(`/etc/apt/sources.list.d/${repo.name}.list`, `# ${HEADER}\n${repo.line(keyring, ctx.facts.codename, ctx.facts.arch === "arm64" ? "arm64" : "amd64")}\n`, { owner }),
   ];
 }
 

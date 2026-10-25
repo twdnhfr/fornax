@@ -109,6 +109,7 @@ export class OnePassword {
     const accountArgs = this.account && !this.serviceAccountToken ? ["--account", this.account] : [];
     const env: Record<string, string | undefined> = { ...process.env };
     if (this.serviceAccountToken) env.OP_SERVICE_ACCOUNT_TOKEN = this.serviceAccountToken;
+    if (!Bun.which(this.bin[0]!)) fail("onepassword_failed", `the 1Password CLI (${this.bin[0]}) is not installed here`, "install it (https://developer.1password.com/docs/cli/get-started/) — on a server with peers, plan + apply puts it there");
     const p = Bun.spawn([...this.bin, ...accountArgs, ...args], {
       stdin: stdin === undefined ? "ignore" : new Blob([stdin]),
       env,

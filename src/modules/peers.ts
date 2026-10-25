@@ -7,7 +7,7 @@
  */
 import { check, packages, type Resource } from "../core/resource.ts";
 import { q, sha256 } from "../core/shell.ts";
-import type { ModuleCtx } from "./common.ts";
+import { aptRepo, REPOS, type ModuleCtx } from "./common.ts";
 import { binaryResource } from "./deploy.ts";
 
 export const PEER_DIR = "/var/lib/fornax/fleet";
@@ -48,7 +48,8 @@ export function peerResources(ctx: ModuleCtx): Resource[] {
   const mark = sha256(script).slice(0, 16);
   const bin = binaryResource(ctx);
   return [
-    packages("peers", ["git"], o),
+    // the 1Password CLI only when the fleet keeps its secrets there: the token comes from the client per run
+    ...(ctx.fleet.config.onepassword ? [...aptRepo(ctx, REPOS.onepassword!, "peers"), packages("peers", ["git", "1password-cli"], o)] : [packages("peers", ["git"], o)]),
     ...(bin ? [bin] : []),
     check(
       "peers-repo",

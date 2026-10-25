@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.2 — unreleased
+## 1.1.2 — 2026-10-25
 
 - **A security key forwarded to the machine fornax runs on** (`ssh -A` from where it is plugged in, e.g. a phone or laptop into a box at home) is used when its agent holds the key of `ssh.security_key`; before, fornax tried the key handle there, which has no key behind it.
 

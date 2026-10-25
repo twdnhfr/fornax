@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.4 — unreleased
+## 1.1.4 — 2026-10-25
 
 - **A forwarded root key is offered even when `~/.ssh/config` sets `IdentitiesOnly yes`** for the server: fornax names it as a public key file, ahead of the local key handle. Tested from a phone (Termius, a Face ID key in the secure enclave) through a box at home.
 

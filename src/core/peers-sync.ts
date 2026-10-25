@@ -64,15 +64,15 @@ export interface SyncResult {
   checked: CommitCheck[];
   /** This machine's repo moved forward to `head`. */
   fastForwarded: boolean;
-  /** Commits from a server that change what trust rests on: not taken over without --accept-trust-changes. */
-  pendingTrust: CommitCheck[];
+  /** Commits from a server signed with a login key (a host could have had them signed): not taken over without review (--accept). */
+  pendingReview: CommitCheck[];
 }
 
 /**
  * Bring this machine and the peers to the newest signed head. `push: false` only looks (and still
  * fast-forwards nothing): what `fornax peers status` shows.
  */
-export async function syncPeers(fleet: Fleet, o: { push: boolean; acceptTrust?: boolean; servers?: Server[]; log: (l: string) => void }): Promise<SyncResult> {
+export async function syncPeers(fleet: Fleet, o: { push: boolean; acceptReview?: boolean; servers?: Server[]; log: (l: string) => void }): Promise<SyncResult> {
   const name = fleet.config.fleet;
   const trust = needTrust(name);
   const dir = fleet.dir;
@@ -123,15 +123,16 @@ export async function syncPeers(fleet: Fleet, o: { push: boolean; acceptTrust?: 
   // the commits new to this machine (head was accepted above; local is an ancestor of it)
   const from = isAncestor(dir, trust.head, local) ? local : trust.head;
   const checks = isAncestor(dir, head, trust.head) ? [] : assertVerified(dir, from, head);
-  // a commit that came from a server and changes signers, logins, hosts or secret sources is never
-  // taken over on its own: a host you ran something on could have had it signed with your key
-  const pendingTrust = checks.filter((c) => c.trustChange);
-  if (pendingTrust.length && o.push && !o.acceptTrust) {
+  // a commit from a server signed with a key that logs in as root is never taken over on its own: a
+  // host you ran something on could have had your forwarded key sign it — and any change to the fleet
+  // becomes root on some server at the next apply. Commits you sign on your own machine pass.
+  const pendingReview = checks.filter((c) => c.viaLoginKey);
+  if (pendingReview.length && o.push && !o.acceptReview) {
     fail(
-      "trust_change_pending",
-      `${pendingTrust.length} commit(s) from a server change what trust rests on (signers, logins, hosts, secret sources): ${pendingTrust.map((c) => `${c.commit.slice(0, 12)} "${c.subject}" (signed by ${c.signer})`).join("; ")}`,
-      `look at them first: git -C ${dir} log -p ${local.slice(0, 12)}..${head.slice(0, 12)} — then take them over with --accept-trust-changes`,
-      "fornax peers sync --accept-trust-changes",
+      "review_pending",
+      `${pendingReview.length} commit(s) from a server were signed with a login key and wait for your review: ${pendingReview.map((c) => `${c.commit.slice(0, 12)} "${c.subject}"${c.trustChange ? " (changes signers, logins, hosts or secret sources)" : ""}`).join("; ")}`,
+      `look at them: git -C ${dir} log -p ${local.slice(0, 12)}..${head.slice(0, 12)} — then take them over with --accept`,
+      "fornax peers sync --accept",
       { checks },
     );
   }
@@ -160,5 +161,5 @@ export async function syncPeers(fleet: Fleet, o: { push: boolean; acceptTrust?: 
       }
     }
   }
-  return { head, peers, checked: checks, fastForwarded, pendingTrust };
+  return { head, peers, checked: checks, fastForwarded, pendingReview };
 }

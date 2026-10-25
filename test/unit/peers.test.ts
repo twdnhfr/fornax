@@ -73,6 +73,21 @@ describe("peers: commit signatures", () => {
     expect(checks.every((c) => c.trustChange)).toBe(true);
   });
 
+  test("a commit signed with a key that logs in as root is marked: it could come from a host", () => {
+    const r = repo();
+    r.write([laptop, phone], [phone]);
+    const anchor = r.commit("start", "laptop");
+    r.commit("from the laptop", "laptop");
+    const head = r.commit("from a host, with the forwarded key", "phone");
+    expect(verifyRange(r.dir, anchor, head).map((c) => c.viaLoginKey)).toEqual([false, true]);
+    // no root keys named: any signature may have travelled
+    const r2 = repo();
+    r2.write([laptop]);
+    const a2 = r2.commit("start", "laptop");
+    const h2 = r2.commit("change", "laptop");
+    expect(verifyRange(r2.dir, a2, h2)[0]!.viaLoginKey).toBe(true);
+  });
+
   test("an unsigned commit is refused (unsigned_fleet)", () => {
     const r = repo();
     r.write([laptop]);

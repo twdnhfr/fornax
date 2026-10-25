@@ -19,7 +19,7 @@ function rev(dir: string, ref: string): string {
 }
 
 export const renderChecks = (checks: CommitCheck[]) =>
-  checks.map((c) => `${c.ok ? "✓" : "✗"} ${short(c.commit)} ${c.subject}${c.ok ? ` — signed by ${c.signer}` : ` — ${c.reason}`}${c.trustChange ? "   ⚠ changes signers or root keys" : ""}`).join("\n");
+  checks.map((c) => `${c.ok ? "✓" : "✗"} ${short(c.commit)} ${c.subject}${c.ok ? ` — signed by ${c.signer}${c.viaLoginKey ? " (a login key)" : ""}` : ` — ${c.reason}`}${c.trustChange ? "   ⚠ changes signers, logins, hosts or secret sources" : ""}`).join("\n");
 
 defineCommand({
   name: "peers trust",
@@ -121,7 +121,7 @@ defineCommand({
     const names = input.servers as string[];
     const servers = names.length ? names.map((n) => getServer(fleet, n)) : undefined;
     const r = await syncPeers(fleet, { push: false, servers, log: ctx.log });
-    return { data: r, human: renderSync(r, false), exitCode: r.peers.some((p) => p.state !== "same") || r.pendingTrust.length ? 1 : 0 };
+    return { data: r, human: renderSync(r, false), exitCode: r.peers.some((p) => p.state !== "same") || r.pendingReview.length ? 1 : 0 };
   },
 });
 
@@ -130,13 +130,13 @@ defineCommand({
   summary: "bring this machine and every server to the newest signed state of the fleet repo (fast-forward only; apply does it by itself)",
   tier: "write",
   args: [{ name: "servers", help: "server names (default: all)", variadic: true }],
-  options: { "accept-trust-changes": { type: "boolean", help: "take over commits from a server that change signers, logins, hosts or secret sources — after you looked at them" } },
+  options: { accept: { type: "boolean", help: "take over commits from a server that were signed with a login key — after you looked at them (git log -p)" } },
   async run(input, ctx) {
     const fleet = loadFleet(ctx);
     if (!fleet.config.peers?.enabled) fail("no_peers", "peers are not enabled in fornax.yaml", "set peers.enabled: true and peers.signers, then plan + apply");
     const names = input.servers as string[];
     const servers = names.length ? names.map((n) => getServer(fleet, n)) : undefined;
-    const r = await syncPeers(fleet, { push: true, acceptTrust: Boolean(input.acceptTrustChanges), servers, log: ctx.log });
+    const r = await syncPeers(fleet, { push: true, acceptReview: Boolean(input.accept), servers, log: ctx.log });
     const bad = r.peers.filter((p) => p.state === "refused" || p.state === "unreachable" || p.state === "not_set_up" || p.pushed === false);
     return { data: r, human: renderSync(r, true), exitCode: bad.length ? 1 : 0 };
   },
@@ -146,13 +146,25 @@ export function renderSync(r: SyncResult, pushed: boolean): string {
   const word: Record<string, string> = { same: "in sync", behind: "behind", missing: "empty", not_set_up: "not set up", unreachable: "unreachable", refused: "REFUSED", ahead: "ahead" };
   return [
     r.checked.length ? renderChecks(r.checked) : "",
-    !pushed && r.pendingTrust.length ? `⚠ ${r.pendingTrust.length} commit(s) from a server change what trust rests on — look at them, then: fornax peers sync --accept-trust-changes` : "",
+    !pushed && r.pendingReview.length ? `⚠ ${r.pendingReview.length} commit(s) from a server were signed with a login key and wait for your review — git log -p, then: fornax peers sync --accept` : "",
     `newest signed state: ${short(r.head)}${r.fastForwarded ? " (this machine moved forward to it)" : ""}`,
     ...r.peers.map((p) => `  ${p.server}: ${p.head ? short(p.head) : "—"} ${word[p.state]}${pushed && p.pushed ? " → updated" : ""}${p.pushed === false ? " → push failed" : ""}${p.reason ? ` (${p.reason})` : ""}`),
   ].filter(Boolean).join("\n");
 }
 
 const RUNS = "/var/lib/fornax/runs";
+
+/**
+ * Hand a run's output to the client and remove the run once the client confirmed it (it answers the
+ * marker with the nonce it sent); without that answer — a dropped connection — the run stays for attach.
+ */
+async function deliver(r: { out: string; code: number }, run: string, nonce: string, input: { next(): Promise<string | undefined> }, log: (l: string) => void, dropped: () => boolean) {
+  process.stdout.write(r.out);
+  if (!nonce) return;
+  log(`${RUN_DONE} ${nonce}`);
+  const ack = await Promise.race([input.next(), Bun.sleep(15_000).then(() => undefined)]);
+  if (ack === "ack" && !dropped()) rmSync(run, { recursive: true, force: true });
+}
 
 /** stdin line by line, as it arrives (the client keeps it open to confirm the end of a run). */
 function stdinLines(): { next(): Promise<string | undefined> } {
@@ -238,16 +250,17 @@ defineCommand({
     const token = (await input_.next()) ?? "";
     const trustLine = (await input_.next()) ?? "";
     const hostKeys = (await input_.next()) ?? "";
+    const nonce = (await input_.next()) ?? "";
     const [anchor, head] = trustLine.split(":");
     if (!anchor || !head) fail("no_trust_anchor", "the client sent no trusted state", "start it with fornax --on <server> …");
-    // reattaching is no new run: follow the old one right here
+    // reattaching is no new run: follow the old one right here, and remove it only once delivered
     if (argv[0] === "peers" && argv[1] === "attach") {
       const id = String(argv[2] ?? "");
       if (!/^[\w-]+$/.test(id) || !existsSync(join(RUNS, id))) fail("unknown_run", `no run ${id} on ${server}`);
       const r = await follow(join(RUNS, id), ctx.log);
       closePeerConnections(`/run/fornax/cm/${id}`);
-      rmSync(join(RUNS, id), { recursive: true, force: true });
-      return { data: r.out, human: r.out, exitCode: r.code };
+      await deliver(r, join(RUNS, id), nonce, input_, ctx.log, () => false);
+      return { data: null, human: "", exitCode: r.code };
     }
     const dir = PEER_DIR;
     if (!existsSync(join(dir, "fornax.yaml"))) fail("not_set_up", `no fleet repo at ${dir} yet`, "plan + apply with peers.enabled sets it up, then fornax peers sync");
@@ -296,12 +309,7 @@ defineCommand({
     }
     // delivered: nothing of it stays on the server. The client confirms it got the output (it answers
     // the marker below on stdin); without that answer — a dropped connection — the run stays for attach
-    if (!dropped) {
-      process.stdout.write(r.out);
-      log(`${RUN_DONE} ${id}`);
-      const ack = await Promise.race([input_.next(), Bun.sleep(15_000).then(() => undefined)]);
-      if (ack === "ack") rmSync(run, { recursive: true, force: true });
-    }
+    if (!dropped) await deliver(r, run, nonce, input_, log, () => dropped);
     return { data: null, human: "", exitCode: r.code };
   },
 });
@@ -317,7 +325,7 @@ defineCommand({
     if (!/^[\w-]+$/.test(id) || !existsSync(join(RUNS, id))) fail("unknown_run", `no run ${id} on this host`);
     const r = await follow(join(RUNS, id), ctx.log);
     closePeerConnections(`/run/fornax/cm/${id}`);
-    rmSync(join(RUNS, id), { recursive: true, force: true });
+    // read here on the host itself: nobody confirms delivery, so the run stays until it is pruned
     return { data: r.out, human: r.out, exitCode: r.code };
   },
 });

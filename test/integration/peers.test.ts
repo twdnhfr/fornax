@@ -144,7 +144,7 @@ describe("peers on three servers", () => {
     expect(ssh("p1", "ls -A /var/lib/fornax/runs 2>/dev/null | wc -l").trim()).toBe("0");
   });
 
-  test("a trust change a host commits is held back until it is accepted", async () => {
+  test("a trust change a host commits is held back and marked as one", async () => {
     const before = git("rev-parse", "HEAD");
     const r = await fornax("--on", "p2", "server", "set", "p3", "--ssh-port", "2222", "--json");
     expect(r.code).toBe(0);
@@ -152,8 +152,9 @@ describe("peers on three servers", () => {
     expect(git("rev-parse", "HEAD")).toBe(before);
     const s = await fornax("peers", "sync", "--json");
     expect(s.code).toBe(2);
-    expect(s.json.code).toBe("trust_change_pending");
-    const a = await fornax("peers", "sync", "--accept-trust-changes", "--json");
+    expect(s.json.code).toBe("review_pending");
+    expect(s.json.error).toContain("changes signers, logins, hosts or secret sources");
+    const a = await fornax("peers", "sync", "--accept", "--json");
     expect(git("rev-parse", "HEAD")).not.toBe(before);
     expect(readFileSync(join(fleet, "servers", "p3.yaml"), "utf8")).toContain("2222");
     expect(a.json.peers.find((p: any) => p.server === "p1").state).toBe("same");
@@ -165,14 +166,20 @@ describe("peers on three servers", () => {
     expect(back.code).toBe(0);
   });
 
-  test("a change made on a host is committed there, signed through the forwarded agent, and comes back checked", async () => {
+  test("a change made on a host is committed there, signed through the forwarded agent, and comes back after review", async () => {
     const before = git("rev-parse", "HEAD");
     const r = await fornax("--on", "p2", "server", "set", "p3", "--public-ipv4", "192.0.2.33", "--json");
     if (r.code !== 0) console.error(r.stderr);
     expect(r.code).toBe(0);
-    const after = git("rev-parse", "HEAD");
-    expect(after).not.toBe(before);
-    expect(git("log", "-1", "--format=%s")).toContain("(on p2)");
+    // signed with the login key on a host: it waits for review, nothing moves on its own
+    expect(r.stderr).toContain("not taken over");
+    expect(git("rev-parse", "HEAD")).toBe(before);
+    const held = await fornax("peers", "sync", "--json");
+    expect(held.json.code).toBe("review_pending");
+    const ok = await fornax("peers", "sync", "--accept", "--json");
+    expect(ok.code).toBe(0);
+    expect(git("rev-parse", "HEAD")).not.toBe(before);
+    expect(git("log", "-1", "--format=%s")).toBe("fornax server set p3 (on p2)");
     const v = await fornax("peers", "verify", "--json");
     expect(v.code).toBe(0);
     expect(readFileSync(join(fleet, "servers", "p3.yaml"), "utf8")).toContain("192.0.2.33");

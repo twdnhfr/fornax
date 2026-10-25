@@ -13,7 +13,7 @@ const SCRIPT = `#!/bin/sh
 if [ "$(uname)" = Darwin ]; then
   case "$SSH_ASKPASS_PROMPT" in
     none) exec osascript -e "display notification \\"$1\\" with title \\"fornax — touch your security key\\"" >/dev/null 2>&1 ;;
-    confirm) osascript -e "display dialog \\"$1\\" buttons {\\"No\\", \\"Yes\\"} default button \\"Yes\\" with title \\"fornax\\"" >/dev/null 2>&1 && exit 0 || exit 1 ;;
+    confirm) [ "$(osascript -e "button returned of (display dialog \\"$1\\" buttons {\\"No\\", \\"Yes\\"} default button \\"No\\" with title \\"fornax\\")" 2>/dev/null)" = Yes ] && exit 0 || exit 1 ;;
   esac
   exec osascript -e "text returned of (display dialog \\"$1\\" default answer \\"\\" with hidden answer with title \\"fornax — security key PIN\\" with icon caution)"
 fi

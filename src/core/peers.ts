@@ -74,7 +74,7 @@ export function signersAt(repo: string, commit: string): string[] {
  * What the trust of the fleet rests on at a commit: who signs (peers), how fornax logs in and where
  * to (ssh, a server's host), and where secrets and providers come from. A commit that changes any of
  * it — an option that runs a command when ssh starts, a host that points elsewhere, a new signer —
- * is a trust change: never taken over without being looked at (syncPeers, acceptTrust).
+ * is a trust change: shown apart wherever commits are listed.
  */
 export function trustAt(repo: string, commit: string): { signers: string[]; fleet: string; servers: string } {
   const pick = (doc: Record<string, unknown> | null, keys: string[]) => Object.fromEntries(keys.map((k) => [k, doc?.[k] ?? null]));
@@ -99,6 +99,30 @@ export function trustAt(repo: string, commit: string): { signers: string[]; flee
 /** JSON with sorted keys: equal content, equal text. */
 const stable = (v: unknown): string => JSON.stringify(v, (_, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x));
 
+/** A key line without options and comment: type and key. */
+export const keyBody = (line: string) => {
+  const parts = line.trim().split(/\s+/);
+  const i = parts.findIndex((p) => /^(ssh-|sk-|ecdsa-)/.test(p));
+  return i < 0 ? "" : parts.slice(i, i + 2).join(" ");
+};
+
+/** The keys that log in as root at a commit (ssh.root_keys and authorized_keys, fleet and servers). */
+export function loginKeysAt(repo: string, commit: string): string[] {
+  const keys: string[] = [];
+  const files = ["fornax.yaml", ...git(repo, "ls-tree", "--name-only", commit, "servers/").stdout.split("\n").filter((f) => /\.ya?ml$/.test(f))];
+  for (const f of files) {
+    const r = git(repo, "show", `${commit}:${f}`);
+    if (r.code !== 0) continue;
+    try {
+      const doc = YAML.parse(r.stdout) as { ssh?: { root_keys?: unknown; authorized_keys?: unknown } } | null;
+      for (const list of [doc?.ssh?.root_keys, doc?.ssh?.authorized_keys]) if (Array.isArray(list)) keys.push(...list.map((k) => keyBody(String(k))).filter(Boolean));
+    } catch {
+      /* unreadable: its keys are unknown, the others still count */
+    }
+  }
+  return keys;
+}
+
 /** Key fingerprint (SHA256:…) of a public key line. */
 export function fingerprint(key: string): string {
   const r = run(["ssh-keygen", "-l", "-f", "-"], { stdin: key + "\n" });
@@ -114,10 +138,16 @@ export interface CommitCheck {
   reason?: string;
   /** The commit changes what trust rests on (trustAt): signers, logins, hosts, secret sources. */
   trustChange: boolean;
+  /**
+   * Signed with a key that logs in as root — one fornax forwards to hosts — or, when the fleet names
+   * no root keys, with any key: a host could have had it signed without you seeing the content.
+   * Such a commit is never taken over from a server without review (syncPeers, acceptReview).
+   */
+  viaLoginKey?: boolean;
 }
 
 /** Check one commit's signature against a list of signer key lines. */
-export function verifyCommit(repo: string, commit: string, signers: string[]): { ok: boolean; signer?: string; reason?: string } {
+export function verifyCommit(repo: string, commit: string, signers: string[]): { ok: boolean; signer?: string; key?: string; reason?: string } {
   if (!signers.length) return { ok: false, reason: "the commit before it names no signers (peers.signers)" };
   // the object exactly as stored (not trimmed): the signature covers it byte for byte, minus the gpgsig header
   const obj = git(repo, "cat-file", "commit", commit);
@@ -134,7 +164,7 @@ export function verifyCommit(repo: string, commit: string, signers: string[]): {
     const fp = v.stdout.match(/key (SHA256:\S+)/)?.[1];
     const key = fp ? signers.find((k) => fingerprint(k) === fp) : undefined;
     const comment = key?.split(" ").slice(2).join(" ");
-    return { ok: true, signer: comment || fp };
+    return { ok: true, signer: comment || fp, ...(key ? { key } : {}) };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -164,7 +194,10 @@ export function verifyRange(repo: string, trusted: string, head: string): Commit
     const before = trustAt(repo, prev);
     const after = trustAt(repo, commit);
     const trustChange = JSON.stringify(before) !== JSON.stringify(after);
-    checks.push({ commit, subject, trustChange, ...verifyCommit(repo, commit, before.signers) });
+    const { key, ...v } = verifyCommit(repo, commit, before.signers);
+    const login = loginKeysAt(repo, prev);
+    const viaLoginKey = v.ok ? !login.length || login.includes(keyBody(key ?? "")) : undefined;
+    checks.push({ commit, subject, trustChange, ...v, ...(viaLoginKey !== undefined ? { viaLoginKey } : {}) });
     prev = commit;
   }
   return checks;

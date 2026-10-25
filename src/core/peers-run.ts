@@ -19,7 +19,7 @@ import { isAbsolute, join } from "node:path";
 import { askpassPath } from "./askpass.ts";
 import { fail } from "./errors.ts";
 import { getServer, loadFleet, secret, type Fleet } from "./fleet.ts";
-import { needTrust, RUN_DONE } from "./peers.ts";
+import { git, needTrust, RUN_DONE } from "./peers.ts";
 import { syncPeers } from "./peers-sync.ts";
 import { q } from "./shell.ts";
 import { sshSettings } from "./ssh.ts";
@@ -86,7 +86,7 @@ function forwardingArgs(fleet: Fleet, server: Server, sock: string): string[] {
   const c = fleet.config.ssh;
   const { user, port } = sshSettings(fleet, server);
   const rel = (p: string) => (isAbsolute(p) ? p : join(fleet.dir, p));
-  const args = ["-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", `IdentityAgent=${sock}`, "-o", `ForwardAgent=${sock}`, "-o", "BatchMode=no", "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=30"];
+  const args = ["-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", `IdentityAgent=${sock}`, "-o", `ForwardAgent=${sock}`, "-o", "BatchMode=no", "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=yes", "-o", "ServerAliveInterval=30"];
   if (c.config_file) args.push("-F", c.config_file === "none" ? "/dev/null" : rel(c.config_file));
   if (c.known_hosts_file) args.push("-o", `UserKnownHostsFile=${rel(c.known_hosts_file)}`);
   for (const [k, v] of Object.entries(c.options)) args.push("-o", `${k}=${v}`);
@@ -122,7 +122,9 @@ export async function runOn(o: { cwd: string; fleetDir?: string; serverName: str
     stderr: "pipe",
     env: { ...process.env, SSH_ASKPASS: askpassPath(), SSH_ASKPASS_REQUIRE: "force", DISPLAY: process.env.DISPLAY ?? ":0" },
   });
-  proc.stdin.write(`${token}\n${trust.anchor}:${trust.head}\n${hostKeys}\n`);
+  // the end-of-run marker carries a nonce only this run knows: output from the host cannot fake it
+  const nonce = crypto.randomUUID();
+  proc.stdin.write(`${token}\n${trust.anchor}:${trust.head}\n${hostKeys}\n${nonce}\n`);
   proc.stdin.flush();
   // the host's stderr goes through; its end-of-run marker gets the answer that lets it clean up
   const decoder = new TextDecoder();
@@ -133,7 +135,7 @@ export async function runOn(o: { cwd: string; fleetDir?: string; serverName: str
     while ((i = pending.indexOf("\n")) >= 0) {
       const line = pending.slice(0, i);
       pending = pending.slice(i + 1);
-      if (line.startsWith(RUN_DONE)) {
+      if (line === `${RUN_DONE} ${nonce}`) {
         proc.stdin.write("ack\n");
         proc.stdin.end();
       } else process.stderr.write(line + "\n");
@@ -142,17 +144,29 @@ export async function runOn(o: { cwd: string; fleetDir?: string; serverName: str
   if (pending) process.stderr.write(pending);
   const code = await proc.exited;
 
-  // what the host committed comes back here — checked like everything else — and goes on to the other servers
-  try {
-    const r = await syncPeers(loadFleet({ cwd: o.cwd, fleetDir: o.fleetDir, tier: "read" }), { push: true, log: () => {} });
+  // what the host committed comes back here — checked, and shown to you: it was signed with your
+  // forwarded key, which you could not see the content of — then it goes on to the other servers
+  const takeBack = async (acceptReview: boolean) => {
+    const r = await syncPeers(loadFleet({ cwd: o.cwd, fleetDir: o.fleetDir, tier: "read" }), { push: true, acceptReview, log: () => {} });
     if (r.fastForwarded) {
       const off = r.peers.filter((p) => p.state !== "same" && !p.pushed);
       o.log(`fleet repo moved forward to ${r.head.slice(0, 12)} (from ${server.server}), here and on ${r.peers.length - off.length}/${r.peers.length} servers${off.length ? ` — not on ${off.map((p) => p.server).join(", ")}: fornax peers sync` : ""}`);
     }
+  };
+  try {
+    await takeBack(false);
   } catch (e) {
-    const err = e as { code?: string; message: string; next?: string };
-    if (err.code === "trust_change_pending") o.log(`attention: ${server.server} committed a change to what trust rests on — not taken over. ${err.message}\nlook at it, then: fornax peers sync --accept-trust-changes`);
-    else o.log(`warning: could not take ${server.server}'s fleet repo back: ${err.message}`);
+    const err = e as { code?: string; message: string; details?: { checks?: Array<{ commit: string }> } };
+    if (err.code !== "review_pending") o.log(`warning: could not take ${server.server}'s fleet repo back: ${err.message}`);
+    else if (process.stdin.isTTY && process.stderr.isTTY) {
+      const local = git(fleet.dir, "rev-parse", "HEAD").stdout.trim();
+      const head = err.details?.checks?.at(-1)?.commit ?? "";
+      const diff = git(fleet.dir, "log", "-p", "--stat", "--format=commit %h  %s", `${local}..${head}`).stdout.split("\n");
+      o.log(`\n${server.server} committed this to the fleet repo, signed with your login key:\n${diff.slice(0, 400).join("\n")}${diff.length > 400 ? `\n… (${diff.length - 400} more lines: git -C ${fleet.dir} log -p ${local.slice(0, 12)}..${head.slice(0, 12)})` : ""}`);
+      const answer = prompt("Take it over (here and on every server)? [y/N]")?.trim().toLowerCase();
+      if (answer === "y" || answer === "yes") await takeBack(true).catch((x) => o.log(`warning: ${(x as Error).message}`));
+      else o.log(`not taken over — later: fornax peers sync --accept (after git log -p)`);
+    } else o.log(`attention: ${err.message}\nnot taken over — look at it (git log -p), then: fornax peers sync --accept`);
   }
   return code;
 }

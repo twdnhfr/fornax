@@ -87,7 +87,7 @@ Without `--json` it goes to stderr as `error [<code>]: <message>`, followed by `
 | `unsigned_fleet`, `not_a_signer`, `fleet_rollback`, `no_trust_anchor`, `no_signers`, `unknown_commit`, `git_failed` | peers: a commit in the fleet repo is not signed by one of the signers its parent names, a history does not descend from the last trusted state, no trusted state is pinned on this machine yet (`fornax peers trust`), or git failed |
 | `fleet_diverged`, `peer_push_failed`, `peer_push_refused`, `peer_dirty` | peers: two copies of the fleet repo went different ways (fornax never merges), a push to a server failed or its hook refused it, or the copy on a host has uncommitted changes |
 | `no_peers`, `not_a_host`, `no_forwarded_agent`, `unknown_run`, `not_on_a_host` | `--on`: peers are not enabled, the server is not one of `peers.hosts`, no agent reached the host (run it with `fornax --on`), there is no such run to attach to, or the command keeps secrets where it runs (`env pull`) |
-| `trust_change_pending` | commits from a server change what trust rests on (signers, logins, hosts, secret sources): look at them, then `fornax peers sync --accept-trust-changes` |
+| `review_pending` | commits from a server were signed with a login key and wait for review: look at them (`git log -p`), then `fornax peers sync --accept` |
 | `not_supported` | the provider cannot do this through its API (the hint names its panel) |
 | `provider_auth`, `provider_error`, `provider_not_found`, `provider_timeout`, `provider_unreachable` | the provider's (or Tailscale's) API refused, failed or did not answer |
 | `create_incomplete`, `rename_incomplete` | `server create` / `server rename` stopped half way; the message says what exists already |

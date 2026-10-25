@@ -84,7 +84,47 @@ function print(result: Result, json: boolean) {
 /** Exit code of fornax's own errors: 2 — but 255 for run and shell, which exit with the code of the command on the server (as ssh does). */
 const errorExit = (command?: string) => (command === "run" || command === "shell" ? 255 : 2);
 
+/**
+ * `--on <server>` (before any `--`): the rest of the command line runs on that peer (peers-run.ts).
+ * `--fleet` stays here — it names the fleet this machine uses; the host has its own copy.
+ */
+export function splitOn(argv: string[]): { server: string; fleetDir?: string; rest: string[] } | undefined {
+  const end = argv.indexOf("--") < 0 ? argv.length : argv.indexOf("--");
+  const at = argv.slice(0, end).findIndex((a) => a === "--on" || a.startsWith("--on="));
+  if (at < 0) return undefined;
+  const server = argv[at]!.startsWith("--on=") ? argv[at]!.slice(5) : argv[at + 1];
+  if (!server || server.startsWith("-")) throw new FornaxError("missing_value", "--on needs a server name", undefined, "fornax --on web-1 plan web-1");
+  const rest = argv.filter((_, i) => i !== at && !(i === at + 1 && !argv[at]!.startsWith("--on=")));
+  const f = rest.slice(0, rest.indexOf("--") < 0 ? rest.length : rest.indexOf("--")).findIndex((a) => a === "--fleet" || a.startsWith("--fleet="));
+  let fleetDir: string | undefined;
+  if (f >= 0) {
+    fleetDir = rest[f]!.startsWith("--fleet=") ? rest[f]!.slice(8) : rest[f + 1];
+    rest.splice(f, rest[f]!.startsWith("--fleet=") ? 1 : 2);
+  }
+  return { server, fleetDir, rest };
+}
+
 export async function main(rawArgv: string[]): Promise<number> {
+  const on = (() => {
+    try {
+      return splitOn(rawArgv);
+    } catch (e) {
+      return e as FornaxError;
+    }
+  })();
+  if (on instanceof FornaxError || on) {
+    const wantsJson = jsonRequested(rawArgv);
+    try {
+      if (on instanceof FornaxError) throw on;
+      const { runOn } = await import("./core/peers-run.ts");
+      return await runOn({ cwd: process.cwd(), fleetDir: on.fleetDir, serverName: on.server, argv: on.rest, log: (l) => process.stderr.write(l + "\n") });
+    } catch (e) {
+      const err = asFornaxError(e);
+      if (wantsJson) process.stdout.write(JSON.stringify(err.toJSON(), null, 2) + "\n");
+      else process.stderr.write(`error [${err.code}]: ${err.message}\n${err.hint ? `hint: ${err.hint}\n` : ""}${err.next ? `next: ${err.next}\n` : ""}`);
+      return 2;
+    }
+  }
   const argv = hoistOptions(rawArgv);
   const wantsJson = jsonRequested(argv);
   let command: string | undefined;

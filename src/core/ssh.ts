@@ -43,14 +43,53 @@ export function sshSettings(fleet: Fleet, server: Server) {
 
 /** The environment for ssh: with a hardware key, its PIN and touch prompts as dialogs (askpass.ts). */
 export function sshEnv(fleet: Fleet): Record<string, string | undefined> | undefined {
-  if (!fleet.config.ssh.security_key) return undefined;
+  if (!fleet.config.ssh.security_key || peerHost()) return undefined;
   return { ...process.env, SSH_ASKPASS: askpassPath(), SSH_ASKPASS_REQUIRE: "force", DISPLAY: process.env.DISPLAY ?? ":0" };
 }
 
-/** `agent`: socket of the agent holding the fleet's key (see ssh-agent.ts), when `ssh.key` is set. */
-export function sshArgs(fleet: Fleet, server: Server, agent?: string): string[] {
+/**
+ * On a peer host (`fornax --on <server>`, docs/peers.md): root on any server — this one included —
+ * only through the agent the client forwarded. No key of the fleet's is used here (no ssh.key, no
+ * security_key file), and every connection is closed when the run ends: an approval on the client
+ * never outlives its run.
+ */
+export const peerHost = () => process.env.FORNAX_PEER_HOST === "1";
+
+const PEER_CM = "/run/fornax/cm";
+const peerMasters = new Set<string>();
+let peerCleanup = false;
+
+function peerSshOptions(fleet: Fleet, server: Server): { options: string[]; host: string } {
+  const agent = process.env.SSH_AUTH_SOCK;
+  if (!agent) fail("no_forwarded_agent", "no SSH agent was forwarded to this host", "run it from your machine with `fornax --on <server> …` (it forwards your agent), or ssh -A");
   const c = fleet.config.ssh;
-  const { user, port } = sshSettings(fleet, server);
+  const self = process.env.FORNAX_PEER_SELF === server.server;
+  // the host itself over loopback: a change to its firewall or the tailnet cannot cut that line
+  const host = self ? "127.0.0.1" : server.host;
+  const options = ["-F", "/dev/null", "-o", "BatchMode=yes", "-o", `IdentityAgent=${agent}`, "-o", "IdentitiesOnly=no", "-o", "ControlMaster=auto", "-o", `ControlPath=${PEER_CM}/%C`, "-o", "ControlPersist=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=30"];
+  if (self) options.push("-o", `HostKeyAlias=${server.host}`);
+  if (c.known_hosts_file) options.push("-o", `UserKnownHostsFile=${isAbsolute(c.known_hosts_file) ? c.known_hosts_file : join(fleet.dir, c.known_hosts_file)}`);
+  for (const [k, v] of Object.entries(c.options)) options.push("-o", `${k}=${v}`);
+  if (!peerCleanup) {
+    peerCleanup = true;
+    Bun.spawnSync(["install", "-d", "-m", "0700", PEER_CM]);
+    process.once("exit", () => {
+      for (const m of peerMasters) {
+        const { options: o, target: t } = JSON.parse(m) as { options: string[]; target: string[] };
+        Bun.spawnSync(["ssh", ...o, "-O", "exit", ...t], { stdout: "ignore", stderr: "ignore" });
+      }
+    });
+  }
+  return { options, host };
+}
+
+/**
+ * ssh's options for a server, without the target (`-p`, `-l`, host) — for ssh itself and for git's
+ * GIT_SSH_COMMAND. `agent`: socket of the agent holding the fleet's key (ssh-agent.ts), with `ssh.key`.
+ */
+export function sshOptions(fleet: Fleet, server: Server, agent?: string): string[] {
+  if (peerHost()) return peerSshOptions(fleet, server).options;
+  const c = fleet.config.ssh;
   // ~/… is the home directory; other relative paths are relative to the fleet repo
   const rel = (p: string) => {
     const home = p.replace(/^~(?=\/)/, process.env.HOME ?? "~");
@@ -74,8 +113,20 @@ export function sshArgs(fleet: Fleet, server: Server, agent?: string): string[] 
   else if (c.identity_file) args.push("-i", rel(c.identity_file), "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none");
   if (c.known_hosts_file) args.push("-o", `UserKnownHostsFile=${rel(c.known_hosts_file)}`);
   for (const [k, v] of Object.entries(c.options)) args.push("-o", `${k}=${v}`);
-  args.push("-p", String(port), "-l", user, server.host);
   return args;
+}
+
+/** The host ssh connects to: on a peer host, the host itself over loopback. */
+export const sshHost = (server: Server) => (peerHost() && process.env.FORNAX_PEER_SELF === server.server ? "127.0.0.1" : server.host);
+
+/** `agent`: socket of the agent holding the fleet's key (see ssh-agent.ts), when `ssh.key` is set. */
+export function sshArgs(fleet: Fleet, server: Server, agent?: string): string[] {
+  const { user, port } = sshSettings(fleet, server);
+  const options = sshOptions(fleet, server, agent);
+  const target = ["-p", String(port), "-l", user, sshHost(server)];
+  // the masters this run opened, to close at its end
+  if (peerHost()) peerMasters.add(JSON.stringify({ options, target }));
+  return [...options, ...target];
 }
 
 async function readLines(stream: ReadableStream<Uint8Array>, onLine?: (l: string) => void): Promise<string> {

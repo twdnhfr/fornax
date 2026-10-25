@@ -282,6 +282,8 @@ export async function onePasswordFor(
   resolve: (ref: string) => Promise<string>,
 ): Promise<OnePassword> {
   setExpiryWarnDays(config?.warn_expiry_days ?? 14);
+  // on a peer host the token comes from the client for this run only (fornax --on, peers-run.ts)
+  if (process.env.FORNAX_OP_TOKEN) return new OnePassword(config?.account, process.env.FORNAX_OP_TOKEN);
   const ref = config?.service_account;
   if (!ref) return new OnePassword(config?.account);
   if (!tokens.has(ref)) tokens.set(ref, resolve(ref));

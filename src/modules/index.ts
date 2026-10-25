@@ -2,6 +2,7 @@ import { fail } from "../core/errors.ts";
 import { isSecretRef, secretOrPlain, sites, type Fleet } from "../core/fleet.ts";
 import { fleetAgent } from "../core/ssh-agent.ts";
 import { backupEnabled, backupResources } from "./backup.ts";
+import { peerResources } from "./peers.ts";
 import { historyResources } from "./history.ts";
 import { rootAccessResources } from "./root-access.ts";
 import { parseFacts, one, FACT_FN } from "../core/probe.ts";
@@ -65,7 +66,9 @@ true`);
   // Only servers that deploy or back up need the Linux build of fornax.
   const deploys = Object.values(server.sites).some((s) => s.state === "present" && s.deploy.enabled && s.repo);
   const backups = backupEnabled({ fleet, server, sites: sites(fleet, server) });
-  const binary = deploys || backups ? await remoteBinary(arch) : undefined;
+  // peers run fornax on every server: plan and apply there, and the repo's pre-receive hook
+  const peers = Boolean(fleet.config.peers?.enabled);
+  const binary = deploys || backups || peers ? await remoteBinary(arch) : undefined;
   const hb = backups ? fleet.config.backup?.heartbeat : undefined;
   const isRef = isSecretRef;
   const heartbeat = hb ? { value: await secretOrPlain(fleet, hb), ref: isRef(hb) ? hb : undefined } : undefined;
@@ -111,7 +114,7 @@ export function desired(fleet: Fleet, server: Server, facts: ModuleCtx["facts"],
     const chosen = scope?.sites?.length ? ctx.sites.filter((s) => scope.sites!.includes(s.domain)) : ctx.sites;
     for (const d of scope?.sites ?? []) if (!ctx.sites.some((s) => s.domain === d)) fail("unknown_site", `no site "${d}" on ${server.server}`, undefined, `fornax site list ${server.server}`);
     // certbot and the deploy machinery are server-wide, but sites depend on them: always part of the plan
-    if (!scope?.sites?.length) r.push(...detachResources(ctx), ...serverFiles(ctx));
+    if (!scope?.sites?.length) r.push(...detachResources(ctx), ...serverFiles(ctx), ...peerResources(ctx));
     r.push(...deployResources(ctx));
     if (!scope?.sites?.length) r.push(...backupResources(ctx));
     for (const site of chosen) r.push(...siteResources(ctx, site));

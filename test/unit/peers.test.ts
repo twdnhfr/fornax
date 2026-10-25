@@ -146,3 +146,16 @@ describe("peers: commit signatures", () => {
     expect(verifyRange(r.dir, anchor, head).some((c) => !c.ok)).toBe(true);
   });
 });
+
+describe("--on", () => {
+  test("takes the server out and leaves the command for the host", async () => {
+    const { splitOn } = await import("../../src/cli.ts");
+    expect(splitOn(["--on", "web-1", "plan", "web-2", "--json"])).toEqual({ server: "web-1", fleetDir: undefined, rest: ["plan", "web-2", "--json"] });
+    expect(splitOn(["plan", "web-2", "--on=web-1"])).toEqual({ server: "web-1", fleetDir: undefined, rest: ["plan", "web-2"] });
+    // --fleet names this machine's fleet; the host uses its own copy
+    expect(splitOn(["--fleet", "/f", "--on", "web-1", "apply", "p1"])).toEqual({ server: "web-1", fleetDir: "/f", rest: ["apply", "p1"] });
+    // after -- it belongs to the command run there
+    expect(splitOn(["run", "web-1", "--", "echo", "--on", "x"])).toBeUndefined();
+    expect(() => splitOn(["--on"])).toThrow(FornaxError);
+  });
+});

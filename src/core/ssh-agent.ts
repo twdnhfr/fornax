@@ -15,6 +15,8 @@ const agents = new Map<string, Promise<string>>();
 
 /** Socket of the agent holding the fleet's key, or undefined when the fleet has none. */
 export function fleetAgent(fleet: Fleet): Promise<string> | undefined {
+  // a peer host uses only the agent its client forwarded (ssh.ts, peerHost)
+  if (process.env.FORNAX_PEER_HOST === "1") return undefined;
   const ref = fleet.config.ssh.key;
   if (!ref) return undefined;
   if (!agents.has(ref)) agents.set(ref, start(fleet, ref));

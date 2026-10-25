@@ -6,7 +6,8 @@ import type { Server } from "../core/schema.ts";
 import { assertOrder, desired, preflight, type Scope } from "../modules/index.ts";
 import { autoSync } from "./secrets.ts";
 import { pushCopy } from "../core/fleet-copy.ts";
-import { runnerFor } from "../core/ssh.ts";
+import { peerHost, runnerFor } from "../core/ssh.ts";
+import { syncPeers } from "../core/peers-sync.ts";
 
 const SYMBOL: Record<Change["action"], string> = { create: "+", update: "~", delete: "-", install: "+", run: "!" };
 
@@ -99,8 +100,19 @@ async function runApply(fleet: Fleet, server: Server, plan: Plan, input: Input, 
 async function afterApply(fleet: Fleet, server: Server, applied: unknown, ctx: Context) {
   const synced = await autoSync(fleet, server, applied);
   if (synced?.written.length) ctx.log(`  1Password: wrote ${synced.written.join(", ")} to ${synced.vault}/${synced.item}`);
+  // peers: every server gets the newest signed fleet repo — a failure here never fails the apply either
+  if (fleet.config.peers?.enabled) {
+    try {
+      const r = await syncPeers(fleet, { push: true, log: () => {} });
+      const off = r.peers.filter((p) => p.state === "refused" || p.state === "unreachable" || p.state === "not_set_up" || p.pushed === false);
+      ctx.log(`  peers: fleet repo ${r.head.slice(0, 12)} on ${r.peers.length - off.length}/${r.peers.length} servers${off.length ? ` — not on ${off.map((p) => `${p.server} (${p.reason ?? p.state})`).join(", ")}` : ""}`);
+    } catch (e) {
+      ctx.log(`  warning: fleet repo not passed on to the peers: ${(e as Error).message} — fornax peers sync`);
+    }
+  }
   // the fleet repo goes along, encrypted — a failure here never fails the apply that already happened
-  if (fleet.config.fleet_copy) {
+  // (not from a peer host: the copy is signed with the fleet key, which a host never has)
+  if (fleet.config.fleet_copy && !peerHost()) {
     try {
       const m = await pushCopy(fleet, server);
       ctx.log(`  fleet copy: stored on ${server.server} (${m.commit ? m.commit.slice(0, 12) : "no commit"}${m.dirty ? " + uncommitted" : ""})`);

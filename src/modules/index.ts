@@ -69,9 +69,11 @@ async function binaryFor(arch: "arm64" | "x86_64", current: string | undefined, 
           rmSync(tmp, { recursive: true, force: true });
         }
       }
-      const path = join(cache, "fornax");
+      // the archive carries the server build with its build time next to it (fornax-linux-<arch>{,.build})
+      const named = join(cache, `fornax-${plat}`);
+      const path = existsSync(named) ? named : join(cache, "fornax");
       const sha = new Bun.CryptoHasher("sha256").update(await Bun.file(path).arrayBuffer()).digest("hex");
-      const build = existsSync(join(cache, "fornax.build")) ? readFileSync(join(cache, "fornax.build"), "utf8").trim() || undefined : undefined;
+      const build = existsSync(`${path}.build`) ? readFileSync(`${path}.build`, "utf8").trim() || undefined : undefined;
       return { path, sha, build };
     } catch (d) {
       notice(`note: release v${VERSION} for ${plat} not available (${(d as Error).message})`);

@@ -10,6 +10,8 @@ A command keeps its tier within a major version, so an allowlist of read command
 
 Plans that delete something need `--confirm=<server>` on apply. Only one apply runs per server at a time, and the check that the server has not changed since the plan happens under that lock. Firewall changes add missing rules before removing extra ones, so SSH is never cut off. fornax prunes its own traces on the server (backups after 14 days, logs after 90, the last 50 deploy logs per site). nginx, PHP-FPM, sshd and sudoers changes are validated before reload; a rejected config is rolled back automatically. The script of every apply is kept with its output in `/var/log/fornax/` on the server.
 
+`fornax health` checks what listens beyond localhost against the firewall config. Expected are nginx on 80/443, SSH on the server's SSH port, Tailscale, DHCP and NTP; anything bound to loopback or the tailnet only; and ports opened in `firewall.allow` for the same protocol (an `on:` rule without a port does not count — it says who may come in, not what should listen everywhere). Anything else is a warning (`listening`): ufw keeps the internet out, but the tailnet reaches it. A port Docker publishes (docker-proxy, or a DNAT rule in Docker's `DOCKER` chain) is critical (`docker`): Docker's iptables rules come before ufw's, so the firewall does not filter it — bind it to `127.0.0.1:` in the compose file, or list it in `firewall.allow` when it is meant to be public. `exposed` then tries the public addresses from where fornax runs.
+
 ## For Claude Code
 
 ```bash

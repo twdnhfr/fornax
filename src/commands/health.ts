@@ -1,6 +1,6 @@
 /**
  * `fornax health` — one verdict per server, on demand: is it healthy? Read-only, nothing runs on the
- * servers between calls. Exit code 0 healthy, 1 warning, 2 critical (usable from cron or CI later).
+ * servers between calls. Exit code 0 healthy, 1 a warning or worse, 2 an error (usable from cron or CI).
  */
 import { connect } from "node:net";
 import { defineCommand } from "../core/command.ts";
@@ -9,7 +9,7 @@ import { daysUntil, expiryNote } from "../core/onepassword.ts";
 import { all, FACT_FN, parseFacts } from "../core/probe.ts";
 import type { Server } from "../core/schema.ts";
 import { q } from "../core/shell.ts";
-import { runnerFor } from "../core/ssh.ts";
+import { runnerFor, sshSettings } from "../core/ssh.ts";
 import { backupEnabled } from "../modules/backup.ts";
 import { serverStatus, SSL_SCRIPT } from "./observe.ts";
 import { tailnetPlan } from "./tailnet.ts";
@@ -40,40 +40,91 @@ ${probes.join("\n")}
 [ -f /var/lib/fornax/backup-status.json ] && fact backup_status "$(tr -d '\\n' < /var/lib/fornax/backup-status.json)"
 systemctl list-unit-files certbot.timer >/dev/null 2>&1 && fact certbot_timer "$(systemctl is-active certbot.timer 2>/dev/null)"
 ss -tulpnH 2>/dev/null | while read -r proto _ _ _ local _ proc; do fact listen "$proto $local $(printf '%s' "$proc" | sed -n 's/.*(("\\([^"]*\\)".*/\\1/p')"; done
+for v in 4 6; do t=iptables; [ $v = 6 ] && t=ip6tables; command -v $t >/dev/null && $t -w -t nat -S DOCKER 2>/dev/null | grep -- '-j DNAT' | while read -r l; do fact docker_nat "$v $l"; done; done
 true`;
 }
 
-/** What may listen beyond the machine itself: the web server, SSH, Tailscale and DHCP. */
-const EXPECTED = (p: { proto: string; port: number; proc: string }) =>
-  (p.proc === "nginx" && (p.port === 80 || p.port === 443)) ||
-  ((p.proc === "sshd" || p.proc === "systemd") && p.port === 22) ||
-  p.proc === "tailscaled" ||
-  (p.proto === "udp" && p.port === 68);
+/** What may listen beyond the machine itself: the web server, SSH, Tailscale, DHCP and NTP. */
+const EXPECTED = (p: Listener, sshPort: number) =>
+  !p.docker &&
+  ((p.proc === "nginx" && (p.port === 80 || p.port === 443)) ||
+    ((p.proc === "sshd" || p.proc === "systemd") && p.port === sshPort) ||
+    p.proc === "tailscaled" ||
+    (p.proto === "udp" && (p.port === 68 || p.port === 123)));
 
 export interface Listener {
   proto: string;
   address: string;
   port: number;
+  /** Last port of a range Docker publishes (2456:2457). */
+  last?: number;
   proc: string;
+  /** Published by Docker, whose own iptables rules come before ufw's. */
+  docker: boolean;
 }
 
-/**
- * Sockets listening on more than loopback or the tailnet interface (which tailscaled owns) that
- * are neither the usual ones nor opened on purpose in `firewall.allow`.
- */
-export function unusualListeners(lines: string[], allowed: Array<number | string>): Listener[] {
-  const extra = new Set(allowed.map((p) => String(p)));
+/** An entry of `firewall.allow` (proto defaults to tcp). */
+export type AllowRule = { port?: number | string; proto?: "tcp" | "udp"; on?: string };
+
+/** `proto address:port process` lines, as the health script collects them from `ss -tulpnH`. */
+export function parseListeners(lines: string[]): Listener[] {
   return lines
     .map((l) => {
       const [proto = "", local = "", proc = "?"] = l.split(" ");
       const i = local.lastIndexOf(":");
-      return { proto, address: local.slice(0, i), port: Number(local.slice(i + 1)), proc: proc || "?" };
+      return { proto, address: local.slice(0, i), port: Number(local.slice(i + 1)), proc: proc || "?", docker: proc === "docker-proxy" };
     })
-    .filter((p) => p.port > 0)
-    .filter((p) => !/^(127\.|\[::1\]|\[::ffff:127\.|\[fe80:)/.test(p.address) && !/%(lo|tailscale\d*)$/.test(p.address) && !/^(100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|\[fd7a:115c:a1e0:)/.test(p.address))
-    .filter((p) => !EXPECTED(p) && !extra.has(String(p.port)))
+    .filter((p) => p.port > 0);
+}
+
+/**
+ * Ports Docker forwards to containers: the DNAT rules of its nat chain DOCKER (`<4|6> <rule>` from
+ * `iptables -t nat -S DOCKER`), also there when Docker runs without its userland proxy and nothing
+ * shows up in ss.
+ */
+export function dockerPublished(rules: string[]): Listener[] {
+  return rules.flatMap((r) => {
+    const proto = r.match(/ -p (tcp|udp)\b/)?.[1];
+    const port = r.match(/ --dport (\d+)(?::(\d+))?/);
+    if (!proto || !port) return [];
+    const v6 = r.startsWith("6 ");
+    const dest = r.match(/ -d ([\da-fA-F.:]+)\/\d+/)?.[1];
+    const address = dest ? (v6 ? `[${dest}]` : dest) : v6 ? "[::]" : "0.0.0.0";
+    return [{ proto, address, port: Number(port[1]), ...(port[2] ? { last: Number(port[2]) } : {}), proc: "docker", docker: true }];
+  });
+}
+
+/** Whether a port (or a range) is opened on purpose in `firewall.allow`, for the same protocol. */
+export function allowedBy(l: Pick<Listener, "proto" | "port" | "last">, allow: AllowRule[]): boolean {
+  return allow.some((a) => {
+    // a whole interface (on: tailscale0) says who may come in, not that this service should listen beyond localhost
+    if (a.port === undefined || (a.proto ?? "tcp") !== l.proto) return false;
+    const [from, to = from] = String(a.port).split(":").map(Number) as [number, number?];
+    return from! <= l.port && (l.last ?? l.port) <= to!;
+  });
+}
+
+const LOCAL_ONLY = (p: Listener) =>
+  /^(127\.|\[::1\]|\[::ffff:127\.|\[fe80:)/.test(p.address) || /%(lo|tailscale\d*)$/.test(p.address) || /^(100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|\[fd7a:115c:a1e0:)/.test(p.address);
+
+/**
+ * Sockets listening on more than loopback or the tailnet (which tailscaled owns) that are neither
+ * the usual ones nor opened on purpose in `firewall.allow`, each port once. Ports Docker publishes
+ * (docker-proxy in ss, or a DNAT rule of its DOCKER chain) are marked: ufw does not filter them.
+ */
+export function unusualListeners(lines: string[], opts: { allow?: AllowRule[]; sshPort?: number; dockerRules?: string[] } = {}): Listener[] {
+  const nat = dockerPublished(opts.dockerRules ?? []).filter((d) => !LOCAL_ONLY(d));
+  const covers = (d: Listener, p: Listener) => d.proto === p.proto && d.port <= p.port && p.port <= (d.last ?? d.port);
+  const listening = parseListeners(lines).map((p) => (p.docker || nat.some((d) => covers(d, p)) ? { ...p, docker: true } : p));
+  // a rule with nothing in ss: Docker runs without its userland proxy
+  const unseen = nat.filter((d) => !listening.some((p) => covers(d, p)));
+  return [...listening, ...unseen]
+    .filter((p) => !LOCAL_ONLY(p))
+    .filter((p) => !EXPECTED(p, opts.sshPort ?? 22) && !allowedBy(p, opts.allow ?? []))
     .filter((p, i, all) => all.findIndex((q) => q.port === p.port && q.proto === p.proto) === i);
 }
+
+const where = (u: Listener) => `${u.proc} ${u.address}:${u.port}${u.last ? `-${u.last}` : ""}/${u.proto}`;
 
 /** Ports a scan of the server's public addresses finds open, from where fornax runs (TCP, 80/443 aside). */
 async function publiclyOpen(addresses: string[], ports: number[]): Promise<string[]> {
@@ -167,8 +218,11 @@ export async function serverHealth(fleet: Fleet, server: Server): Promise<{ serv
   }
 
   // network: what listens beyond the machine, and what of it the internet actually reaches
-  const unusual = unusualListeners(all(f, "listen"), server.firewall.allow.flatMap((a) => (a.port === undefined ? [] : [a.port])));
-  add("listening", unusual.length ? "warn" : "ok", unusual.length ? `beyond localhost — the firewall keeps the internet out (see "exposed"), but machines the tailnet policy lets in reach them: ${unusual.map((u) => `${u.proc} ${u.address}:${u.port}/${u.proto}`).join(", ")}` : "only nginx (80/443), SSH and Tailscale beyond localhost");
+  const unusual = unusualListeners(all(f, "listen"), { allow: server.firewall.allow, sshPort: sshSettings(fleet, server).port, dockerRules: all(f, "docker_nat") });
+  const docker = unusual.filter((u) => u.docker);
+  const blocked = unusual.filter((u) => !u.docker);
+  add("listening", blocked.length ? "warn" : "ok", blocked.length ? `beyond localhost — the firewall keeps the internet out (see "exposed"), but machines the tailnet policy lets in reach them: ${blocked.map(where).join(", ")}` : "beyond localhost only nginx (80/443), SSH, Tailscale and what firewall.allow opens");
+  if (docker.length) add("docker", "crit", `published by Docker, which ufw does not filter — open to the internet unless bound to 127.0.0.1 (or listed in firewall.allow on purpose): ${docker.map(where).join(", ")}`);
   const publicAddrs = [server.public_ipv4, server.public_ipv6].filter((a): a is string => Boolean(a));
   if (publicAddrs.length) {
     const ports = [...new Set([22, 3306, 5432, 6379, 11211, 33060, ...unusual.filter((u) => u.proto === "tcp").map((u) => u.port)])].filter((p) => !server.firewall.allow.some((a) => String(a.port) === String(p)));
@@ -229,7 +283,7 @@ async function tailnetCheck(fleet: Fleet): Promise<Check | null> {
 
 defineCommand({
   name: "health",
-  summary: "is a server healthy? disk, memory, load, services, daemons, sites, certificates, backups — one verdict per server (exit 0 ok, 1 warning, 2 critical)",
+  summary: "is a server healthy? disk, memory, load, services, daemons, sites, certificates, backups, what listens beyond localhost — one verdict per server (exit 0 ok, 1 warning or critical)",
   tier: "read",
   args: [{ name: "server", help: "only this server (default: all)" }],
   options: { all: { type: "boolean", help: "list every check, not only the ones that are not ok" } },

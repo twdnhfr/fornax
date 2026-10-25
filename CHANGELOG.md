@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.0 — unreleased
+
+- **`fornax health` checks what listens against the firewall config:** ports opened in `firewall.allow` count only for their protocol, port ranges count, and SSH is expected on the server's own port. Ports Docker publishes (docker-proxy, or a DNAT rule in its `DOCKER` chain, also without the userland proxy) are critical — ufw does not filter them — unless `firewall.allow` opens them on purpose. NTP (123/udp) joins DHCP as expected. ([safety](docs/safety.md))
+
 ## 1.0.1 — 2026-10-24
 
 - **fornax is public.** `self-update` downloads releases over plain HTTPS — no GitHub CLI needed any more; it stays the way in for a private fork. Trust still comes from the signature, never from the channel. The README installs with `curl`.

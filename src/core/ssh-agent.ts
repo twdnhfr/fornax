@@ -28,7 +28,7 @@ async function start(fleet: Fleet, ref: string): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "fornax-agent-"));
   chmodSync(dir, 0o700);
   const sock = join(dir, "agent.sock");
-  const agent = Bun.spawn(["ssh-agent", "-D", "-t", "3600", "-a", sock], { stdout: "ignore", stderr: "ignore" });
+  const agent = Bun.spawn(agentCommand(sock, ["-t", "3600"]), { stdout: "ignore", stderr: "ignore" });
   const stop = () => {
     agent.kill();
     rmSync(dir, { recursive: true, force: true });
@@ -43,3 +43,9 @@ async function start(fleet: Fleet, ref: string): Promise<string> {
   }
   return sock;
 }
+
+/**
+ * ssh-agent bound to this process: it runs a watcher as its command and ends when that ends — when
+ * this process is gone, however it ended (the exit handlers do not run on every way out).
+ */
+export const agentCommand = (sock: string, options: string[] = []) => ["ssh-agent", ...options, "-a", sock, "sh", "-c", `while kill -0 ${process.pid} 2>/dev/null; do sleep 2; done`];

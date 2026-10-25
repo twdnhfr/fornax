@@ -17,6 +17,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { askpassPath } from "./askpass.ts";
+import { agentCommand } from "./ssh-agent.ts";
 import { fail } from "./errors.ts";
 import { getServer, loadFleet, secret, type Fleet } from "./fleet.ts";
 import { git, needTrust, RUN_DONE } from "./peers.ts";
@@ -42,7 +43,7 @@ async function forwardAgent(fleet: Fleet): Promise<string> {
   const sock = join(dir, "agent.sock");
   // the agent asks for a security key's PIN, and confirms each use of other keys, through the askpass dialogs
   const env = { ...process.env, SSH_ASKPASS: askpassPath(), SSH_ASKPASS_REQUIRE: "force", DISPLAY: process.env.DISPLAY ?? ":0" };
-  const agent = Bun.spawn(["ssh-agent", "-D", "-a", sock], { stdout: "ignore", stderr: "ignore", env });
+  const agent = Bun.spawn(agentCommand(sock), { stdout: "ignore", stderr: "ignore", env });
   process.once("exit", () => {
     agent.kill();
     rmSync(dir, { recursive: true, force: true });

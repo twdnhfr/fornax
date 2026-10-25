@@ -72,7 +72,12 @@ export async function runOn(o: { cwd: string; fleetDir?: string; serverName: str
   if (!o.argv.length) fail("missing_argument", "--on needs a command to run there", undefined, `fornax --on ${server.server} plan ${server.server}`);
 
   o.log(`fornax on ${server.server}: bringing its fleet repo up to date …`);
-  await syncPeers(fleet, { push: true, servers: [server], log: o.log });
+  const synced = await syncPeers(fleet, { push: true, servers: [server], log: o.log });
+  const st = synced.peers[0];
+  if (st && (st.state === "refused" || st.state === "unreachable" || st.state === "not_set_up" || st.pushed === false)) {
+    if (st.state === "refused") fail("unsigned_fleet", `the fleet repo on ${server.server} cannot be used: ${st.reason}`, "a commit there is not signed by a signer — someone changed it on the server; look at it before anything else");
+    fail("peer_push_failed", `the fleet repo on ${server.server} cannot be used: ${st.reason ?? st.state}`, "plan + apply sets the repo up; then fornax peers sync");
+  }
   const trust = needTrust(fleet.config.fleet);
   const token = fleet.config.onepassword?.service_account ? await secret(fleet, fleet.config.onepassword.service_account) : "";
   const sock = await forwardAgent(fleet);
@@ -86,10 +91,13 @@ export async function runOn(o: { cwd: string; fleetDir?: string; serverName: str
   });
   const code = await proc.exited;
 
-  // what the host committed comes back here — checked like everything else
+  // what the host committed comes back here — checked like everything else — and goes on to the other servers
   try {
-    const r = await syncPeers(loadFleet({ cwd: o.cwd, fleetDir: o.fleetDir, tier: "read" }), { push: true, servers: [server], log: () => {} });
-    if (r.fastForwarded) o.log(`fleet repo here moved forward to ${r.head.slice(0, 12)} (from ${server.server})`);
+    const r = await syncPeers(loadFleet({ cwd: o.cwd, fleetDir: o.fleetDir, tier: "read" }), { push: true, log: () => {} });
+    if (r.fastForwarded) {
+      const off = r.peers.filter((p) => p.state !== "same" && !p.pushed);
+      o.log(`fleet repo moved forward to ${r.head.slice(0, 12)} (from ${server.server}), here and on ${r.peers.length - off.length}/${r.peers.length} servers${off.length ? ` — not on ${off.map((p) => p.server).join(", ")}: fornax peers sync` : ""}`);
+    }
   } catch (e) {
     o.log(`warning: could not take ${server.server}'s fleet repo back: ${(e as Error).message}`);
   }

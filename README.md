@@ -163,6 +163,7 @@ For humans who would rather click: the fleet at a glance, server status, health,
 | [Secrets](docs/secrets.md) | secret references, 1Password service account, expiring credentials |
 | [Hardware keys](docs/hardware-keys.md) | root only with a YubiKey; working as a site's user |
 | [Fleet copies](docs/fleet-copy.md) | the fleet repo, encrypted and signed, on every server |
+| [Peers](docs/peers.md) | every server a host: plan and apply from any server, over your forwarded key, signed commits only |
 | [History](docs/history.md) | `/etc` in git: how a server got to where it is |
 | [Local dashboard](docs/ui.md) | `fornax ui`: what it shows, how it is secured |
 | [Safety](docs/safety.md) | permission tiers, guard rails, agent setup |

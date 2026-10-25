@@ -189,6 +189,13 @@ defineCommand({
     const [token = "", trustLine = ""] = (await new Response(Bun.stdin.stream()).text()).split("\n");
     const [anchor, head] = trustLine.split(":");
     if (!anchor || !head) fail("no_trust_anchor", "the client sent no trusted state", "start it with fornax --on <server> …");
+    // reattaching is no new run: follow the old one right here
+    if (argv[0] === "peers" && argv[1] === "attach") {
+      const id = String(argv[2] ?? "");
+      if (!/^[\w-]+$/.test(id) || !existsSync(join(RUNS, id))) fail("unknown_run", `no run ${id} on ${server}`);
+      const r = await follow(join(RUNS, id), ctx.log);
+      return { data: r.out, human: r.out, exitCode: r.code };
+    }
     const dir = PEER_DIR;
     if (!existsSync(join(dir, "fornax.yaml"))) fail("not_set_up", `no fleet repo at ${dir} yet`, "plan + apply with peers.enabled sets it up, then fornax peers sync");
     if (git(dir, "status", "--porcelain").stdout.trim()) fail("peer_dirty", `the fleet repo on ${server} has uncommitted changes`, "a run that ended before its commit was signed: look at them with fornax --on <server> run -- git -C /var/lib/fornax/fleet status");

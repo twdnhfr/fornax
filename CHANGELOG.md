@@ -2,6 +2,7 @@
 
 ## 1.1.0 — unreleased
 
+- **Peers — every server a host** (`peers:` in `fornax.yaml`, off by default): the fleet repo lies on every server, and `fornax --on <server> <command>` runs plan, apply or any other command there, with your login key forwarded for that run only — servers hold no keys to each other. Every commit must be signed by one of `peers.signers`, checked against the signers of the commit before it; your machine pins the state it trusts (`fornax peers trust`) and refuses older or forged histories. Changes made on a host are committed there, signed through your agent, and come back checked. A run goes on when the connection drops (`peers attach`). New: `peers trust`, `peers verify`, `peers status`, `peers sync`. ([peers](docs/peers.md))
 - **`fornax health` checks what listens against the firewall config:** ports opened in `firewall.allow` count only for their protocol, port ranges count, and SSH is expected on the server's own port. Ports Docker publishes (docker-proxy, or a DNAT rule in its `DOCKER` chain, also without the userland proxy) are critical — ufw does not filter them — unless `firewall.allow` opens them on purpose. NTP (123/udp) joins DHCP as expected. ([safety](docs/safety.md))
 
 ## 1.0.1 — 2026-10-24

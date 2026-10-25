@@ -68,7 +68,8 @@ function peerSshOptions(fleet: Fleet, server: Server): { options: string[]; host
   const host = self ? "127.0.0.1" : server.host;
   const options = ["-F", "/dev/null", "-o", "BatchMode=yes", "-o", `IdentityAgent=${agent}`, "-o", "IdentitiesOnly=no", "-o", "ControlMaster=auto", "-o", `ControlPath=${PEER_CM}/%C`, "-o", "ControlPersist=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=30"];
   if (self) options.push("-o", `HostKeyAlias=${server.host}`);
-  if (c.known_hosts_file) options.push("-o", `UserKnownHostsFile=${isAbsolute(c.known_hosts_file) ? c.known_hosts_file : join(fleet.dir, c.known_hosts_file)}`);
+  // the host's own record of the other servers' keys: ssh.known_hosts_file is a path on your machine
+  options.push("-o", "UserKnownHostsFile=/var/lib/fornax/peers_known_hosts");
   for (const [k, v] of Object.entries(c.options)) options.push("-o", `${k}=${v}`);
   if (!peerCleanup) {
     peerCleanup = true;

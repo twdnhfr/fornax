@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.1 — unreleased
+## 1.1.1 — 2026-10-25
 
 - **Peers:** the build a host downloads for a server of another architecture now carries its build time, so it updates an older fornax there instead of counting as older itself.
 

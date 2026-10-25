@@ -103,6 +103,8 @@ else echo missing; fi`;
 export function binaryResource(ctx: ModuleCtx): Resource | undefined {
   const bin = ctx.facts.binary;
   if (!bin) return undefined;
+  // left as it is: in sync by definition, nothing to upload
+  if (bin.keep) return check("fornax-binary-kept", `fornax binary on the server (${bin.sha.slice(0, 12)}, left as it is)`, "[ -x /usr/local/bin/fornax ]", ":", { owner: "fornax" });
   const staged = `/var/tmp/fornax-staging/${bin.sha}`;
   return {
     id: "binary:/usr/local/bin/fornax",

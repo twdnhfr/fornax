@@ -10,6 +10,8 @@ import { pendingHandlers, type Resource } from "../core/resource.ts";
 import { MODULES, type Server } from "../core/schema.ts";
 import { runnerFor } from "../core/ssh.ts";
 import { remoteBinary } from "../core/binary.ts";
+import { peerHost } from "../core/ssh.ts";
+import { notice } from "../core/notice.ts";
 import { DISTROS, SUPPORTED_UBUNTU, type ModuleCtx } from "./common.ts";
 import { SERVER_MODULES, serverFiles, serverRetire } from "./server.ts";
 import { siteResources, deployResources } from "./site.ts";
@@ -39,6 +41,22 @@ export function assertOrder(server: Server, facts: ModuleCtx["facts"], scope: Sc
   fail("not_provisioned", `${server.server} is not set up yet — a plan of only ${scope.sites.join(", ")} would stop half-way (no nginx and PHP from fornax there)`, "the first setup installs the server and all its sites in one go", `fornax server provision ${server.server}`);
 }
 
+/**
+ * The build of fornax a server should run. A peer host has only its own: for a server of the other
+ * architecture it leaves the binary there as it is — your machine (or a host of that
+ * architecture) updates it.
+ */
+async function binaryFor(arch: "arm64" | "x86_64", current: string | undefined, name: string): Promise<ModuleCtx["facts"]["binary"]> {
+  try {
+    return await remoteBinary(arch);
+  } catch (e) {
+    if (!peerHost() || (e as { code?: string }).code !== "binary_missing") throw e;
+    if (!current) fail("binary_missing", `${name} has no fornax yet, and this host has no build for ${arch}`, "apply it once from your machine, or from a host of the same architecture");
+    notice(`note: no ${arch} build of fornax on this host — the one on ${name} stays as it is`);
+    return { path: "", sha: current!, keep: true };
+  }
+}
+
 export async function preflight(fleet: Fleet, server: Server): Promise<ModuleCtx["facts"]> {
   const out = await runnerFor(fleet, server).run(`${FACT_FN}
 . /etc/os-release; fact id "$ID"; fact codename "$VERSION_CODENAME"; fact version "$VERSION_ID"; fact arch "$(uname -m)"
@@ -46,6 +64,7 @@ case "$VERSION_CODENAME" in noble) fact php_ppa yes;; *) curl -fsI --max-time 10
 ${LEGACY_GONE} || fact legacy yes
 id -u anvil >/dev/null 2>&1 && ! id -u fornax >/dev/null 2>&1 && fact legacy_admin yes
 ${PROVISIONED} && fact provisioned yes
+[ -x /usr/local/bin/fornax ] && fact fornax_sha "$(sha256sum /usr/local/bin/fornax | cut -c1-64)"
 true`);
   const f = parseFacts(out.stdout);
   const version = one(f, "version") ?? "?";
@@ -68,7 +87,7 @@ true`);
   const backups = backupEnabled({ fleet, server, sites: sites(fleet, server) });
   // peers run fornax on every server: plan and apply there, and the repo's pre-receive hook
   const peers = Boolean(fleet.config.peers?.enabled);
-  const binary = deploys || backups || peers ? await remoteBinary(arch) : undefined;
+  const binary = deploys || backups || peers ? await binaryFor(arch, one(f, "fornax_sha"), server.server) : undefined;
   const hb = backups ? fleet.config.backup?.heartbeat : undefined;
   const isRef = isSecretRef;
   const heartbeat = hb ? { value: await secretOrPlain(fleet, hb), ref: isRef(hb) ? hb : undefined } : undefined;

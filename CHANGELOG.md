@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.3 — unreleased
+## 1.1.3 — 2026-10-25
 
 - **A forwarded agent counts when it holds any key that may log in as root** (`ssh.root_keys`), not only the one `ssh.security_key` names — e.g. a key a phone's SSH app keeps in its secure enclave and forwards.
 

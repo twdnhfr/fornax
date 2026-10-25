@@ -67,16 +67,24 @@ function knownHosts(fleet: Fleet, log: (l: string) => void): string {
   const lines = new Set<string>();
   for (const server of fleet.servers.values()) {
     const { port } = sshSettings(fleet, server);
-    const name = port === 22 ? server.host : `[${server.host}]:${port}`;
+    const label = (h: string) => (port === 22 ? h : `[${h}]:${port}`);
+    // here the name may go through ~/.ssh/config (HostName, HostKeyAlias); the host looks up server.host itself
+    const g = Bun.spawnSync(["ssh", "-G", ...(c.config_file && c.config_file !== "none" ? ["-F", isAbsolute(c.config_file) ? c.config_file : join(fleet.dir, c.config_file)] : []), "-p", String(port), server.host], { stdout: "pipe", stderr: "ignore" }).stdout.toString();
+    const opt = (k: string) => g.match(new RegExp(`^${k} (.+)$`, "m"))?.[1]?.trim();
+    const names = [...new Set([server.host, opt("hostkeyalias"), opt("hostname")].filter((n): n is string => Boolean(n) && n !== "none"))];
     let found = false;
-    for (const f of files.filter((f) => existsSync(f))) {
-      const r = Bun.spawnSync(["ssh-keygen", "-F", name, "-f", f], { stdout: "pipe", stderr: "ignore" });
-      for (const l of r.stdout.toString().split("\n").filter((l) => l && !l.startsWith("#"))) {
-        lines.add(l);
-        found = true;
+    for (const name of names) {
+      for (const f of files.filter((f) => existsSync(f))) {
+        const r = Bun.spawnSync(["ssh-keygen", "-F", label(name), "-f", f], { stdout: "pipe", stderr: "ignore" });
+        for (const l of r.stdout.toString().split("\n").filter((l) => l && !l.startsWith("#"))) {
+          // the key, under the name the host will look it up by
+          const key = l.split(/\s+/).slice(1).join(" ");
+          lines.add(`${label(server.host)} ${key}`);
+          found = true;
+        }
       }
     }
-    if (!found) log(`note: no host key of ${server.server} (${name}) known here — a host will not connect to it; connect once from here first (e.g. fornax server status ${server.server})`);
+    if (!found) log(`note: no host key of ${server.server} (${label(server.host)}) known here — a host will not connect to it; connect once from here first (e.g. fornax server status ${server.server})`);
   }
   return [...lines].join("\n") + "\n";
 }

@@ -4,8 +4,9 @@
  * - your own devices (autogroup:member): reach everything, SSH to everything — as before;
  * - machines at home (tag:home, `tailscale.home`): reach everything, SSH to the servers;
  * - internet-facing servers (tag:server): reach the tailnet's DNS servers and what
- *   `tailscale.allow` lists — nothing else, and SSH nowhere. A compromised app on a server stays
- *   on that server.
+ *   `tailscale.allow` lists — nothing else, and SSH nowhere (with peers: sshd of the other servers,
+ *   where root still needs the key a person forwards). A compromised app on a server stays on
+ *   that server.
  *
  * fornax writes `acls`, `ssh`, `hosts` and its tags in `tagOwners`; everything else in the policy
  * (nodeAttrs, autoApprovers, grants of your own …) is kept as it is.

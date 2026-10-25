@@ -22,7 +22,10 @@ export async function tailnetPlan(fleet: Fleet) {
   const current = parseHujson(text);
   let desired: Record<string, unknown>;
   try {
-    desired = desiredPolicy({ current, serverTag, homeTag: HOME_TAG, home: cfg!.home, allow: cfg!.allow, machines, nameservers, sshCheck: cfg!.ssh_check });
+    // peers: servers manage each other — SSH between them (root there still only with a forwarded key)
+    const sshPorts = [...new Set([fleet.config.ssh.port, ...[...fleet.servers.values()].map((s) => s.ssh?.port ?? fleet.config.ssh.port)])];
+    const peers = fleet.config.peers?.enabled ? [{ from: serverTag, to: serverTag, ports: sshPorts, why: "peers: plan and apply from any server" }] : [];
+    desired = desiredPolicy({ current, serverTag, homeTag: HOME_TAG, home: cfg!.home, allow: [...cfg!.allow, ...peers], machines, nameservers, sshCheck: cfg!.ssh_check });
   } catch (e) {
     return fail("config_invalid", `tailscale.allow / home: ${(e as Error).message}`, `machines in the tailnet: ${[...machines.keys()].join(", ")}`);
   }

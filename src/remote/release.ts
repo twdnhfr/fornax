@@ -6,7 +6,7 @@
  * In-place sites (taken over from Forge without zero-downtime) are their own checkout:
  * fetch, reset to the commit, build in place; a rollback rebuilds an older commit.
  */
-import { appendFileSync, chownSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chownSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHmac } from "node:crypto";
 import { join } from "node:path";
 import { DEPLOY_KEY, DEPLOY_LOG_DIR, KNOWN_HOSTS, nodeUpstreamConf, REQUEST_DIR, RUNTIME_DIR, SITE_LOG_DIR, type SiteRuntime } from "../core/runtime.ts";
@@ -136,7 +136,9 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
     return finish();
   }
   if (newLogs) chownSync(SITE_LOG_DIR(rt.user), 0, who.gid);
-  const previous = existsSync(current) ? readlinkSync(current) : null;
+  // what root itself looks at in the site's tree, it looks at as the site user
+  const tree = siteTree(who);
+  const previous = tree.has(current) ? tree.link(current) : null;
   result.previous = previous;
 
   /** Run a command; as the site user unless asRoot. Output goes to the deploy log. */
@@ -164,7 +166,7 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
   const reload = () => {
     if (rt.preset !== "static" && rt.preset !== "node") run(`systemctl reload php${rt.php}-fpm`, { asRoot: true, allowFail: true });
     const live = rt.mode === "in_place" ? rt.root : current;
-    if (rt.preset === "laravel" && existsSync(join(live, "artisan"))) run(`php${rt.php} artisan queue:restart`, { cwd: live, allowFail: true });
+    if (rt.preset === "laravel" && tree.has(join(live, "artisan"))) run(`php${rt.php} artisan queue:restart`, { cwd: live, allowFail: true });
     for (const p of rt.programs.filter((p) => /^[\w.-]+$/.test(p))) run(`supervisorctl restart '${p}:*'`, { asRoot: true, allowFail: true });
   };
 
@@ -250,40 +252,40 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
     const vars = { SITE: domain, SITE_PATH: rt.root, RELEASE_PATH: dir, PHP: `php${rt.php}`, COMPOSER: `php${rt.php} /usr/local/bin/composer` };
     // ANVIL_* as well: deploy scripts and commands written before the rename keep working
     const env = Object.fromEntries(Object.entries(vars).flatMap(([k, v]) => [[`FORNAX_${k}`, v], [`ANVIL_${k}`, v]]));
-    const legacyScript = join(dir, ".anvil", "deploy.sh");
-    const custom = !existsSync(join(dir, rt.deploy_script)) && rt.deploy_script === ".fornax/deploy.sh" && existsSync(legacyScript) ? legacyScript : join(dir, rt.deploy_script);
-    if (existsSync(custom)) {
-      run(`bash '${custom}'`, { cwd: dir, env });
+    const has = (f: string) => tree.has(join(dir, f));
+    // the repo's package.json, as its user may read it: one linked to a file of root's is refused, not read
+    const scripts = () => {
+      const pkg = tree.read(join(dir, "package.json"));
+      if (pkg === null) throw new StepError(`package.json cannot be read as ${rt.user}`);
+      return (JSON.parse(pkg) as { scripts?: Record<string, string> }).scripts ?? {};
+    };
+    const custom = [rt.deploy_script, ...(rt.deploy_script === ".fornax/deploy.sh" ? [".anvil/deploy.sh"] : [])].find(has);
+    if (custom) {
+      run(`bash '${join(dir, custom)}'`, { cwd: dir, env });
     } else if (rt.deploy_commands) {
       run(`set -e\n${rt.deploy_commands}`, { cwd: dir, env });
     } else if (rt.preset === "node") {
       // the project's own package manager: its lockfile says which
-      const has = (f: string) => existsSync(join(dir, f));
       if (has("yarn.lock") || has("pnpm-lock.yaml")) throw new StepError("yarn and pnpm projects need their build in deploy.commands (or .fornax/deploy.sh)");
       const pm = has("bun.lock") || has("bun.lockb") || (!has("package-lock.json") && existsSync("/usr/local/bin/bun")) ? "bun" : "npm";
       if (pm === "bun" && !existsSync("/usr/local/bin/bun")) throw new StepError("the project uses bun (bun.lock), but bun is not on the server — add bun to the server's tools");
-      const pkg = join(dir, "package.json");
-      const scripts = existsSync(pkg) ? ((JSON.parse(readFileSync(pkg, "utf8")) as { scripts?: Record<string, string> }).scripts ?? {}) : {};
-      if (existsSync(pkg)) run(pm === "bun" ? "bun install --frozen-lockfile" : has("package-lock.json") ? "npm ci" : "npm install", { cwd: dir, env });
-      if (scripts.build) run(`${pm} run build`, { cwd: dir, env });
+      const pkg = has("package.json");
+      const script = pkg ? scripts().build : undefined;
+      if (pkg) run(pm === "bun" ? "bun install --frozen-lockfile" : has("package-lock.json") ? "npm ci" : "npm install", { cwd: dir, env });
+      if (script) run(`${pm} run build`, { cwd: dir, env });
     } else {
       const php = `php${rt.php}`;
       const laravel = rt.preset === "laravel";
-      if (laravel && !existsSync(join(dir, "artisan"))) {
-        const has = (f: string) => existsSync(join(dir, f));
-        const fits = has("public/index.php") || has("index.php") ? "php" : has("package.json") && /"start"\s*:/.test(readFileSync(join(dir, "package.json"), "utf8")) ? "node" : "static";
+      if (laravel && !has("artisan")) {
+        const fits = has("public/index.php") || has("index.php") ? "php" : has("package.json") && /"start"\s*:/.test(tree.read(join(dir, "package.json")) ?? "") ? "node" : "static";
         throw new StepError(`the repo has no artisan — it is no Laravel app; preset ${fits} looks right: fornax site set ${domain} --preset ${fits}, then plan, apply and deploy again`);
       }
-      if (existsSync(join(dir, "composer.json"))) run(`${php} /usr/local/bin/composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-progress`, { cwd: dir, env });
+      if (has("composer.json")) run(`${php} /usr/local/bin/composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-progress`, { cwd: dir, env });
       // before the frontend build: Tailwind also scans the compiled views in storage/framework/views
       if (laravel) run(`${php} artisan optimize`, { cwd: dir, env });
-      const pkg = join(dir, "package.json");
-      if (existsSync(pkg)) {
-        const scripts = (JSON.parse(readFileSync(pkg, "utf8")) as { scripts?: Record<string, string> }).scripts ?? {};
-        if (scripts.build) {
-          run("bun install --frozen-lockfile || bun install", { cwd: dir, env });
-          run("bun run build", { cwd: dir, env });
-        }
+      if (has("package.json") && scripts().build) {
+        run("bun install --frozen-lockfile || bun install", { cwd: dir, env });
+        run("bun run build", { cwd: dir, env });
       }
       // last: a release whose build failed never touches the database
       if (laravel) {
@@ -293,7 +295,7 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
     }
   };
 
-  const gitSsh: Record<string, string> = rt.uses_deploy_key && existsSync(DEPLOY_KEY(rt.user)) ? { GIT_SSH_COMMAND: `ssh -i ${DEPLOY_KEY(rt.user)} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${KNOWN_HOSTS}` } : {};
+  const gitSsh: Record<string, string> = rt.uses_deploy_key && tree.has(DEPLOY_KEY(rt.user)) ? { GIT_SSH_COMMAND: `ssh -i ${DEPLOY_KEY(rt.user)} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${KNOWN_HOSTS}` } : {};
 
   try {
     if (rt.mode === "in_place") return await inPlace();
@@ -312,7 +314,7 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
       return finish();
     }
     if (o.rollback) {
-      const all = listReleases(releases);
+      const all = tree.releases(releases);
       const cur = previous ? previous.split("/").pop() : undefined;
       const target = o.to ?? all.filter((r) => r < (cur ?? "~")).pop();
       if (!target || !all.includes(target)) throw new StepError(`no release to roll back to (current: ${cur ?? "none"}, available: ${all.join(", ") || "none"})`);
@@ -345,12 +347,12 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
 
     log("=> linking shared files");
     for (const name of [".env", "auth.json"]) {
-      if (existsSync(join(rt.root, name))) run(`ln -sfn '${join(rt.root, name)}' '${join(dir, name)}'`);
+      if (tree.has(join(rt.root, name))) run(`ln -sfn '${join(rt.root, name)}' '${join(dir, name)}'`);
     }
     for (const p of rt.shared) {
       const target = join(rt.root, p);
       const inRelease = join(dir, p);
-      if (!existsSync(target)) run(existsSync(inRelease) ? `mv '${inRelease}' '${target}'` : `mkdir -p '${target}'`);
+      if (!tree.has(target)) run(tree.has(inRelease) ? `mv '${inRelease}' '${target}'` : `mkdir -p '${target}'`);
       if (p === "storage" && rt.preset === "laravel") {
         run(`mkdir -p '${target}/app/public' '${target}/framework/cache/data' '${target}/framework/sessions' '${target}/framework/views' '${target}/logs'`);
       }
@@ -392,7 +394,7 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
       log(`=> health check after activation ${rt.health_check.url}`);
       const ok = await healthCheck(rt, log);
       if (!ok) {
-        if (previous && existsSync(previous)) {
+        if (previous && tree.has(previous)) {
           log(`=> health check failed — rolling back to ${previous}`);
           activate(previous);
           reload();
@@ -415,7 +417,7 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
     result.error = (e as Error).message;
     log(`=> FAILED: ${result.error}`);
     // a failed build never becomes current; drop it so it cannot be rolled back to
-    if (result.release && !o.rollback && !o.restart && readlinkSafe(current) !== join(releases, result.release)) {
+    if (result.release && !o.rollback && !o.restart && tree.link(current) !== join(releases, result.release)) {
       removeTree(who, join(releases, result.release));
     }
     return finish();
@@ -425,9 +427,9 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
   async function inPlace(): Promise<ReleaseResult> {
     const dir = rt.root;
     const git = (args: string, opts: { allowFail?: boolean } = {}) => run(`git -C '${dir}' ${args}`, { env: gitSsh, ...opts });
-    if (!existsSync(join(dir, ".git"))) {
+    if (!tree.has(join(dir, ".git"))) {
       // a new site: the (empty) site directory becomes the checkout
-      const empty = !existsSync(dir) || readdirSync(dir).length === 0;
+      const empty = !tree.has(dir) || tree.empty(dir);
       if (!empty || o.rollback) throw new StepError(`${dir} is not a git checkout — in-place deploys need the site directory to be one (or empty, for the first deploy)`);
       log(`=> first deploy: cloning ${rt.repo_url} into ${dir}`);
       run(`git clone --quiet --branch '${rt.branch}' '${rt.repo_url}' '${dir}'`, { env: gitSsh });
@@ -587,25 +589,54 @@ async function nodeCheck(rt: SiteRuntime, slot: NonNullable<SiteRuntime["node"]>
   return false;
 }
 
-const readlinkSafe = (p: string) => {
-  try {
-    return readlinkSync(p);
-  } catch {
-    return null;
-  }
-};
-
 interface SiteIds {
   uid: number;
   gid: number;
 }
 
+type Spawn = (argv: string[]) => { exitCode: number | null; stdout: { toString(): string } };
+
 /**
  * Everything inside a site's tree runs as the site user: as root, git would honour the repo's own
  * config and a recursive delete could be raced into following a symlink. `who` comes from siteIds: never root.
  */
-function asSite(who: SiteIds, argv: string[]) {
-  return Bun.spawnSync(["setpriv", `--reuid=${who.uid}`, `--regid=${who.gid}`, "--init-groups", "--", "env", "-i", "PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/", ...argv]);
+function asSite(who: SiteIds, argv: string[], spawn: Spawn = (a) => Bun.spawnSync(a)) {
+  return spawn(["setpriv", `--reuid=${who.uid}`, `--regid=${who.gid}`, "--init-groups", "--", "env", "-i", "PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/", ...argv]);
+}
+
+/**
+ * The site's tree as its user sees it — for what the release itself looks at there. Root follows the
+ * links a repo or user plants: a package.json linked to /etc/shadow was read, and the JSON parse error
+ * quoted its first word into the deploy log and the notifications.
+ */
+export function siteTree(who: SiteIds, spawn?: Spawn) {
+  const as = (...argv: string[]) => asSite(who, argv, spawn);
+  return {
+    /** Is there something at `path`, links followed? */
+    has: (path: string) => as("test", "-e", path).exitCode === 0,
+    /** The file's content, or null when the user may not read it. */
+    read: (path: string) => {
+      const p = as("cat", "--", path);
+      return p.exitCode === 0 ? p.stdout.toString() : null;
+    },
+    /** Where the link at `path` points, or null. */
+    link: (path: string) => {
+      const p = as("readlink", "--", path);
+      return p.exitCode === 0 ? p.stdout.toString().replace(/\n$/, "") : null;
+    },
+    /** Is the directory empty (and readable)? */
+    empty: (dir: string) => {
+      const p = as("ls", "-A", "--", dir);
+      return p.exitCode === 0 && p.stdout.toString() === "";
+    },
+    /** The releases in `dir` (yyyymmddhhmmss directories), oldest first. */
+    releases: (dir: string) =>
+      as("find", "-L", `${dir}/`, "-mindepth", "1", "-maxdepth", "1", "-type", "d", "-printf", "%f\\n")
+        .stdout.toString()
+        .split("\n")
+        .filter((n) => /^\d{14}$/.test(n))
+        .sort(),
+  };
 }
 
 function shaOf(who: SiteIds, dir: string): string | null {
@@ -615,15 +646,8 @@ function shaOf(who: SiteIds, dir: string): string | null {
 
 const removeTree = (who: SiteIds, path: string) => asSite(who, ["rm", "-rf", "--", path]);
 
-export function listReleases(dir: string): string[] {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((n) => /^\d{14}$/.test(n) && statSync(join(dir, n)).isDirectory())
-    .sort();
-}
-
 function prune(who: SiteIds, dir: string, keep: number, current: string, log: (l: string) => void) {
-  const all = listReleases(dir);
+  const all = siteTree(who).releases(dir);
   const drop = all.slice(0, Math.max(0, all.length - keep)).filter((r) => r !== current);
   for (const r of drop) {
     removeTree(who, join(dir, r));
@@ -632,10 +656,10 @@ function prune(who: SiteIds, dir: string, keep: number, current: string, log: (l
 }
 
 /** Keep the newest deploy logs (each deploy writes a .log and a .json). */
-function pruneDeployLogs(dir: string) {
-  const runs = [...new Set(readdirSync(dir).filter((f) => /\.(log|json)$/.test(f)).map((f) => f.replace(/\.(log|json)$/, "")))].sort();
+function pruneDeployLogs(logDir: string) {
+  const runs = [...new Set(readdirSync(logDir).filter((f) => /\.(log|json)$/.test(f)).map((f) => f.replace(/\.(log|json)$/, "")))].sort();
   for (const run of runs.slice(0, Math.max(0, runs.length - RETENTION.deployLogs))) {
-    for (const ext of [".log", ".json"]) rmSync(join(dir, run + ext), { force: true });
+    for (const ext of [".log", ".json"]) rmSync(join(logDir, run + ext), { force: true });
   }
 }
 

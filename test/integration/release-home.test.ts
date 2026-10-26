@@ -2,6 +2,8 @@
  * `fornax release` as root, for sites whose user is gone: the Linux build of fornax runs in a throwaway
  * Ubuntu container (Docker or OrbStack). Before, `id -u` of a missing user gave "" and so uid 0 — the
  * clone, build, link and delete steps ran as root in the home that user left behind.
+ * With the user there, what the release itself reads in the site's tree it reads as that user: a repo
+ * whose package.json was a link to a file of root's got that file's first word into the deploy log.
  *
  *   bun test test/integration/release-home.test.ts
  */
@@ -16,6 +18,8 @@ import type { ReleaseResult } from "../../src/remote/release.ts";
 const IMAGE = process.env.FORNAX_TEST_IMAGE ?? "ubuntu:24.04";
 const docker = Bun.spawnSync(["docker", "info"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0;
 const SECRET = "root-only-secret";
+// a single word: JSON.parse quotes the first word of what it cannot parse
+const ROOT_WORD = "rootonlyword4711";
 
 const runtime = (domain: string, user: string, more: Partial<SiteRuntime> = {}): SiteRuntime => ({
   version: 1,
@@ -41,16 +45,34 @@ const runtime = (domain: string, user: string, more: Partial<SiteRuntime> = {}):
   ...more,
 });
 
-const sites = [runtime("ghost.test", "ghost"), runtime("rb.test", "ghostrb"), runtime("ip.test", "ghostip", { mode: "in_place" }), runtime("alive.test", "alive")];
+const sites = [
+  runtime("ghost.test", "ghost"),
+  runtime("rb.test", "ghostrb"),
+  runtime("ip.test", "ghostip", { mode: "in_place" }),
+  runtime("alive.test", "alive"),
+  runtime("linked.test", "linker", { preset: "node", repo_url: "https://git.invalid/acme/linked.git" }),
+  runtime("lrb.test", "linkrb"),
+];
 
 // as root in the container; each `fact` line becomes facts[<name>]
 const SCRIPT = String.raw`set -u
 fact() { printf '@@%s\t%s\n' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
 last() { cat "$(ls -t /var/log/fornax-sites/$1/deploys/*.json | head -1)"; }
 mkdir -p /etc/fornax/sites && cp /t/sites/*.json /etc/fornax/sites/
-# the image has no git: this one notes who runs it and fails, which ends the run there
-printf '#!/bin/sh\necho "$(id -un) $*" >> /tmp/git-calls\nexit 1\n' > /usr/local/bin/git && chmod 755 /usr/local/bin/git
+# the image has no git: this one notes who runs it and fails, which ends the run there — except for
+# linked.git, a repo whose package.json is a link to a file only root may read
+cat > /usr/local/bin/git <<'GIT'
+#!/bin/sh
+echo "$(id -un) $*" >> /tmp/git-calls
+case "$*" in
+  clone*linked.git*) for a; do dir=$a; done; mkdir -p "$dir" && ln -s /etc/root-only "$dir/package.json"; exit $? ;;
+  *" rev-parse HEAD") echo 4f2a9c1d4e5b6a7c8d9e0f1a2b3c4d5e6f7a8b9c; exit 0 ;;
+esac
+exit 1
+GIT
+chmod 755 /usr/local/bin/git
 install -m 666 /dev/null /tmp/git-calls
+install -m 600 /dev/null /etc/root-only && echo ${ROOT_WORD} > /etc/root-only
 {
   # gone, its home left with releases/ linked into /etc
   useradd -m ghost; mkdir -p /etc/v-ghost && echo ${SECRET} > /etc/v-ghost/f
@@ -62,6 +84,10 @@ install -m 666 /dev/null /tmp/git-calls
   useradd -m ghostip; su ghostip -c 'mkdir -p ~/ip.test/.git'
   userdel ghost; userdel ghostrb; userdel ghostip
   useradd -m alive; su alive -c 'mkdir ~/alive.test'
+  useradd -m linker; su linker -c 'mkdir ~/linked.test'
+  # releases/ linked to a directory of root's, with a release in it to roll back to
+  mkdir -p /root/lrb/20260101000000
+  useradd -m linkrb; su linkrb -c 'mkdir ~/lrb.test && ln -s /root/lrb ~/lrb.test/releases'
 } >/dev/null 2>&1
 /t/fornax release ghost.test >/dev/null 2>&1; fact ghost.exit "$?"
 fact ghost.result "$(last ghost)"
@@ -79,6 +105,16 @@ fact gone.rootfiles "$(find /home/ghost /home/ghostrb /home/ghostip -user root)"
 fact alive.result "$(last alive)"
 fact alive.git "$(cat /tmp/git-calls)"
 fact alive.logdir "$(stat -c %U:%G /var/log/fornax-sites/alive)"
+: > /tmp/git-calls
+/t/fornax release linked.test >/dev/null 2>&1; fact linked.exit "$?"
+fact linked.result "$(last linker)"
+fact linked.log "$(cat "$(ls -t /var/log/fornax-sites/linker/deploys/*.log | head -1)")"
+fact linked.git "$(cat /tmp/git-calls)"
+fact linked.releases "$(ls -A /home/linker/linked.test/releases)"
+fact linked.rootfiles "$(find /home/linker -user root)"
+/t/fornax release lrb.test --rollback >/dev/null 2>&1; fact lrb.exit "$?"
+fact lrb.result "$(last linkrb)"
+fact lrb.current "$(readlink /home/linkrb/lrb.test/current)"
 `;
 
 const facts = new Map<string, string>();
@@ -133,5 +169,25 @@ describe.skipIf(!docker)("a release for a site whose user is gone, as root in a 
     expect(result("alive")?.error).toStartWith("command failed (exit 1): git clone");
     expect(fact("alive.git")).toStartWith("alive clone --quiet --depth 1 --branch main https://git.invalid/acme/site.git /home/alive/alive.test/releases/");
     expect(fact("alive.logdir")).toBe("root:alive");
+  });
+});
+
+describe.skipIf(!docker)("what a release reads in the site's tree, it reads as the site user", () => {
+  test("a package.json linked to a file of root's is refused, its content never shows", () => {
+    expect(fact("linked.exit")).toBe("1");
+    expect(result("linked")).toMatchObject({ status: "failed", sha: "4f2a9c1d4e5b6a7c8d9e0f1a2b3c4d5e6f7a8b9c", error: "package.json cannot be read as linker" });
+    expect(fact("linked.result")).not.toContain(ROOT_WORD);
+    expect(fact("linked.log")).toContain("=> building");
+    expect(fact("linked.log")).not.toContain(ROOT_WORD);
+    expect(fact("linked.git")).toStartWith("linker clone --quiet --depth 1 --branch main https://git.invalid/acme/linked.git /home/linker/linked.test/releases/");
+    // the failed release is gone, removed as the user
+    expect(fact("linked.releases")).toBe("");
+    expect(fact("linked.rootfiles")).toBe("");
+  });
+
+  test("releases/ linked to a directory of root's lists nothing to roll back to", () => {
+    expect(fact("lrb.exit")).toBe("1");
+    expect(result("lrb")).toMatchObject({ status: "failed", source: "rollback", error: "no release to roll back to (current: none, available: none)" });
+    expect(fact("lrb.current")).toBe("");
   });
 });

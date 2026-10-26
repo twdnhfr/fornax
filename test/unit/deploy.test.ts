@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { handleHook, MAX_BODY, type HookDeps } from "../../src/remote/hook.ts";
-import { signature, siteIds } from "../../src/remote/release.ts";
+import { signature, siteIds, siteTree } from "../../src/remote/release.ts";
 import { FornaxError } from "../../src/core/errors.ts";
 import { repoUrl, type SiteRuntime } from "../../src/core/runtime.ts";
 import { GitHub, sameKey } from "../../src/githost/github.ts";
@@ -107,6 +109,75 @@ describe("the site user a release runs as", () => {
 
   test("a user with root's uid or group is refused", () => {
     for (const id of [lookup([0, "0\n"]), lookup([0, "1001\n"], [0, "0\n"])]) expect(refusal(id).code).toBe("site_user_root");
+  });
+});
+
+describe("what a release looks at in the site's tree", () => {
+  const site = "/home/shop/shop.example.com";
+  // the server's answers, by command as the site user runs it; anything else fails
+  const fake = (answers: Record<string, [number, string]> = {}) => {
+    const calls: string[][] = [];
+    const tree = siteTree({ uid: 1001, gid: 1002 }, (argv) => {
+      calls.push(argv);
+      const [exitCode, stdout] = answers[argv.slice(9).join(" ")] ?? [1, ""];
+      return { exitCode, stdout };
+    });
+    return { tree, calls };
+  };
+
+  test("every probe and read runs as the site user, with an empty environment", () => {
+    const { tree, calls } = fake();
+    tree.has(`${site}/current`);
+    tree.read(`${site}/releases/20261026120000/package.json`);
+    tree.link(`${site}/current`);
+    tree.empty(site);
+    tree.releases(`${site}/releases`);
+    expect(calls).toHaveLength(5);
+    for (const argv of calls) expect(argv.slice(0, 9)).toEqual(["setpriv", "--reuid=1001", "--regid=1002", "--init-groups", "--", "env", "-i", "PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/"]);
+  });
+
+  test("a package.json the user may not read (a link to /etc/shadow) is no content at all", () => {
+    const pkg = `${site}/releases/20261026120000/package.json`;
+    expect(fake({ [`cat -- ${pkg}`]: [1, ""] }).tree.read(pkg)).toBeNull();
+    expect(fake({ [`cat -- ${pkg}`]: [0, '{"scripts":{}}'] }).tree.read(pkg)).toBe('{"scripts":{}}');
+  });
+
+  test("releases are the directories the user can list, named like one, oldest first", () => {
+    const find = `find -L ${site}/releases/ -mindepth 1 -maxdepth 1 -type d -printf %f\\n`;
+    expect(fake({ [find]: [0, "20261026120000\n20261025090000\nnode_modules\n2026\n"] }).tree.releases(`${site}/releases`)).toEqual(["20261025090000", "20261026120000"]);
+    // releases/ linked to a directory of root's: find fails as the user, root's names stay unseen
+    expect(fake().tree.releases(`${site}/releases`)).toEqual([]);
+  });
+
+  test("`current`, existence and an empty site directory", () => {
+    const { tree } = fake({ [`readlink -- ${site}/current`]: [0, `${site}/releases/20261026120000\n`], [`test -e ${site}/.env`]: [0, ""], [`ls -A -- ${site}`]: [0, ""] });
+    expect(tree.link(`${site}/current`)).toBe(`${site}/releases/20261026120000`);
+    expect(tree.link(`${site}/next`)).toBeNull();
+    expect(tree.has(`${site}/.env`)).toBe(true);
+    expect(tree.has(`${site}/auth.json`)).toBe(false);
+    expect(tree.empty(site)).toBe(true);
+    expect(fake({ [`ls -A -- ${site}`]: [0, ".git\n"] }).tree.empty(site)).toBe(false);
+  });
+
+  test("root's own reads in release.ts are of root's own files: the site's tree only through siteTree", () => {
+    const src = readFileSync(join(import.meta.dir, "..", "..", "src", "remote", "release.ts"), "utf8");
+    // the path each read or probe of node:fs is given (one level of parentheses inside it)
+    const paths = [...src.matchAll(/\b(?:existsSync|readFileSync|readdirSync|statSync|lstatSync|readlinkSync|openSync)\(((?:[^,()]|\([^()]*\))+)/g)].map((m) => m[1]);
+    expect([...new Set(paths)].sort()).toEqual(
+      [
+        "p", // /etc/fornax/sites/<site>.json, the webhook's request in /run, readSafe (the lock, a node app's upstream)
+        "`/proc/${pid}`",
+        "SITE_LOG_DIR(rt.user)",
+        "logDir",
+        "join(logDir, f)",
+        "appLog",
+        "path", // readFrom: appLog
+        '"/usr/local/bin/bun"',
+        "rt.preview_socket",
+        "ntfy.token_file",
+        "tokenFile",
+      ].sort(),
+    );
   });
 });
 

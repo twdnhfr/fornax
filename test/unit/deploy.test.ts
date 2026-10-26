@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { handleHook, MAX_BODY, type HookDeps } from "../../src/remote/hook.ts";
-import { signature } from "../../src/remote/release.ts";
+import { signature, siteIds } from "../../src/remote/release.ts";
+import { FornaxError } from "../../src/core/errors.ts";
 import { repoUrl, type SiteRuntime } from "../../src/core/runtime.ts";
 import { GitHub, sameKey } from "../../src/githost/github.ts";
 
@@ -72,6 +73,40 @@ describe("webhook", () => {
   test("unknown sites are 404", async () => {
     const res = await handleHook(new Request("http://127.0.0.1/fornax/hook/other.example.com", { method: "POST", body: "{}" }), deps([]));
     expect(res.status).toBe(404);
+  });
+});
+
+describe("the site user a release runs as", () => {
+  // `id -u` / `id -g` as the server answers them
+  const lookup = (u: [number, string], g: [number, string] = u) => (flag: "-u" | "-g") => {
+    const [exitCode, stdout] = flag === "-u" ? u : g;
+    return { exitCode, stdout };
+  };
+  const refusal = (id: ReturnType<typeof lookup>) => {
+    try {
+      siteIds("shop", "/home/shop/shop.example.com", id);
+    } catch (e) {
+      return e as FornaxError;
+    }
+    throw new Error("expected siteIds to refuse");
+  };
+
+  test("an existing user gives its ids", () => {
+    expect(siteIds("shop", "/home/shop/shop.example.com", lookup([0, "1001\n"], [0, "1002\n"]))).toEqual({ uid: 1001, gid: 1002 });
+  });
+
+  test("a user that is gone is refused — never uid 0, i.e. root, in its home", () => {
+    // `id: 'shop': no such user` on stderr, nothing on stdout: Number("") would have been 0
+    for (const id of [lookup([1, ""]), lookup([0, ""]), lookup([0, "1001\n"], [1, ""]), lookup([0, "shop\n"])]) {
+      const e = refusal(id);
+      expect(e).toBeInstanceOf(FornaxError);
+      expect(e.code).toBe("site_user_missing");
+      expect(e.message).toBe("refusing to touch /home/shop/shop.example.com as root: user shop does not exist");
+    }
+  });
+
+  test("a user with root's uid or group is refused", () => {
+    for (const id of [lookup([0, "0\n"]), lookup([0, "1001\n"], [0, "0\n"])]) expect(refusal(id).code).toBe("site_user_root");
   });
 });
 

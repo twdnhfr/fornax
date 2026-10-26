@@ -11,6 +11,7 @@ import { createHmac } from "node:crypto";
 import { join } from "node:path";
 import { DEPLOY_KEY, DEPLOY_LOG_DIR, KNOWN_HOSTS, nodeUpstreamConf, REQUEST_DIR, RUNTIME_DIR, SITE_LOG_DIR, type SiteRuntime } from "../core/runtime.ts";
 import { RETENTION } from "../core/plan.ts";
+import { FornaxError } from "../core/errors.ts";
 
 export interface ReleaseResult {
   site: string;
@@ -36,10 +37,25 @@ export function loadRuntime(domain: string): SiteRuntime {
   return JSON.parse(readFileSync(p, "utf8")) as SiteRuntime;
 }
 
-function ids(user: string): { uid: number; gid: number } {
-  const r = Bun.spawnSync(["id", "-u", user]);
-  const g = Bun.spawnSync(["id", "-g", user]);
-  return { uid: Number(r.stdout.toString().trim()), gid: Number(g.stdout.toString().trim()) };
+type IdLookup = (flag: "-u" | "-g", user: string) => { exitCode: number | null; stdout: { toString(): string } };
+
+/**
+ * The ids everything in the site's tree runs with. A user that is gone stops the run: `id` prints
+ * nothing for it, Number("") is 0, and setpriv would have built, linked and deleted as root in its home.
+ */
+export function siteIds(user: string, root: string, id: IdLookup = (flag, u) => Bun.spawnSync(["id", flag, u])): SiteIds {
+  const read = (flag: "-u" | "-g") => {
+    const p = id(flag, user);
+    const out = p.stdout.toString().trim();
+    return p.exitCode === 0 && /^\d+$/.test(out) ? Number(out) : null;
+  };
+  const uid = read("-u");
+  const gid = read("-g");
+  if (uid === null || gid === null) {
+    throw new FornaxError("site_user_missing", `refusing to touch ${root} as root: user ${user} does not exist`, "the site's user was removed: plan and apply the site again (that creates it), or remove the site");
+  }
+  if (uid === 0 || gid === 0) throw new FornaxError("site_user_root", `refusing to touch ${root} as root: user ${user} has uid ${uid} and gid ${gid}`, "a site's user is never root or in root's group");
+  return { uid, gid };
 }
 
 export async function release(domain: string, o: { rollback?: boolean; to?: string; restart?: boolean } = {}): Promise<ReleaseResult> {
@@ -80,13 +96,9 @@ async function lock(domain: string): Promise<() => void> {
 async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: boolean; to?: string; restart?: boolean }): Promise<ReleaseResult> {
   const started = new Date();
   const ts = stamp();
-  const { uid, gid } = ids(rt.user);
-  const who = { uid, gid };
   // root-owned, outside the site's home (`plan`/`apply` creates them; servers not applied since get them here)
-  if (!existsSync(SITE_LOG_DIR(rt.user))) {
-    mkdirSync(SITE_LOG_DIR(rt.user), { recursive: true, mode: 0o750 });
-    chownSync(SITE_LOG_DIR(rt.user), 0, gid);
-  }
+  const newLogs = !existsSync(SITE_LOG_DIR(rt.user));
+  if (newLogs) mkdirSync(SITE_LOG_DIR(rt.user), { recursive: true, mode: 0o750 });
   const logDir = DEPLOY_LOG_DIR(rt.user);
   mkdirSync(logDir, { recursive: true, mode: 0o750 });
   const logPath = join(logDir, `${ts}${o.rollback ? "-rollback" : o.restart ? "-restart" : ""}.log`);
@@ -101,12 +113,11 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
   const source = o.rollback ? "rollback" : o.restart ? "restart" : (request?.source ?? "cli");
   const releases = join(rt.root, "releases");
   const current = join(rt.root, "current");
-  const previous = existsSync(current) ? readlinkSync(current) : null;
   const result: ReleaseResult = {
     site: domain,
     status: "failed",
     release: null,
-    previous,
+    previous: null,
     sha: null,
     started: started.toISOString(),
     finished: "",
@@ -114,6 +125,19 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
     log: logPath,
     source,
   };
+
+  // a user that is gone stops the run before anything happens in its tree — reported like any failed run
+  let who: SiteIds;
+  try {
+    who = siteIds(rt.user, rt.root);
+  } catch (e) {
+    result.error = (e as Error).message;
+    log(`=> FAILED: ${result.error}`);
+    return finish();
+  }
+  if (newLogs) chownSync(SITE_LOG_DIR(rt.user), 0, who.gid);
+  const previous = existsSync(current) ? readlinkSync(current) : null;
+  result.previous = previous;
 
   /** Run a command; as the site user unless asRoot. Output goes to the deploy log. */
   const run = (cmd: string, opts: { asRoot?: boolean; cwd?: string; allowFail?: boolean; env?: Record<string, string> } = {}) => {
@@ -129,7 +153,7 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
     // setpriv instead of runuser/sudo: no PAM session, so nothing extra lands in the journal
     const argv = opts.asRoot
       ? ["bash", "-c", cmd]
-      : ["setpriv", `--reuid=${uid}`, `--regid=${gid}`, "--init-groups", "--", "env", "-i", ...Object.entries(env).map(([k, v]) => `${k}=${v}`), "bash", "-c", cmd];
+      : ["setpriv", `--reuid=${who.uid}`, `--regid=${who.gid}`, "--init-groups", "--", "env", "-i", ...Object.entries(env).map(([k, v]) => `${k}=${v}`), "bash", "-c", cmd];
     const p = Bun.spawnSync(argv, { cwd: opts.cwd ?? "/", env: opts.asRoot ? { ...process.env, ...env } : undefined, stdout: "pipe", stderr: "pipe" });
     const out = (p.stdout.toString() + p.stderr.toString()).trimEnd();
     if (out) log(out);
@@ -578,7 +602,7 @@ interface SiteIds {
 
 /**
  * Everything inside a site's tree runs as the site user: as root, git would honour the repo's own
- * config and a recursive delete could be raced into following a symlink.
+ * config and a recursive delete could be raced into following a symlink. `who` comes from siteIds: never root.
  */
 function asSite(who: SiteIds, argv: string[]) {
   return Bun.spawnSync(["setpriv", `--reuid=${who.uid}`, `--regid=${who.gid}`, "--init-groups", "--", "env", "-i", "PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/", ...argv]);

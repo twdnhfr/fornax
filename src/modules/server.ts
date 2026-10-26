@@ -353,7 +353,8 @@ case "$tag" in bun-v*) ;; *) echo "could not find the latest bun release" >&2; e
 curl -fsSL "https://github.com/oven-sh/bun/releases/download/$tag/SHASUMS256.txt.asc" -o "$d/sums.asc"
 curl -fsSL "https://github.com/oven-sh/bun/releases/download/$tag/bun-linux-$a.zip" -o "$d/bun-linux-$a.zip"
 printf %s ${q(BUN_KEY)} | base64 -d > "$d/bun.gpg"
-gpgv --keyring "$d/bun.gpg" -o - "$d/sums.asc" > "$d/sums" 2>/dev/null || { echo "bun $tag: SHASUMS256.txt is not signed by Bun's release key" >&2; exit 1; }
+# only that key: gpgv has no --no-default-keyring, and with an empty homedir there is no trustedkeys.kbx to fall back on
+gpgv --homedir "$d" --keyring "$d/bun.gpg" -o - "$d/sums.asc" > "$d/sums" 2>/dev/null || { echo "bun $tag: SHASUMS256.txt is not signed by Bun's release key" >&2; exit 1; }
 (cd "$d" && grep -E "^[0-9a-f]{64}  bun-linux-$a\\.zip$" sums | sha256sum -c --quiet --strict -) || { echo "bun $tag: checksum mismatch" >&2; exit 1; }
 unzip -q "$d/bun-linux-$a.zip" -d "$d" && install -m 0755 "$d/bun-linux-$a/bun" /usr/local/bin/bun && ln -sfn bun /usr/local/bin/bunx )`;
 

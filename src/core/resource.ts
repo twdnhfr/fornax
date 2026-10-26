@@ -1,5 +1,5 @@
 import { fail } from "./errors.ts";
-import { asUser, emit, homeOf, inHome, q, sha256 } from "./shell.ts";
+import { asUser, emit, homeOf, q, sha256 } from "./shell.ts";
 
 /**
  * Something on a server that should be in a certain state. Every resource knows how to
@@ -122,8 +122,27 @@ function ownHome(path: string, user: string) {
   if (h && h !== "root" && h !== user) fail("config_invalid", `${path} is in the home of ${h}, so it must belong to ${h} (owner: ${h}:${h}), not ${user}`, `fornax writes in /home/${h} only as ${h}`);
 }
 
-/** Run `script` as the user whose home it acts in — as root once that user is gone (nobody is left to plant symlinks). */
-const asHomeUser = (user: string, script: string) => `if id -u ${q(user)} >/dev/null 2>&1; then ${asUser(user, script)}; else ( ${script} ); fi`;
+/** A probe prints this when it will not look at a path: the plan stops there (parseProbe in core/plan.ts). */
+export const REFUSED = "@@refused";
+
+/** The non-root user whose home holds `path`, if any. */
+export const homeUser = (path: string) => {
+  const h = homeOf(path);
+  return h && h !== "root" ? h : undefined;
+};
+
+/**
+ * Run `script` as the user whose home holds `path` — never as root. Without that user: a home that is gone
+ * holds nothing (`gone` runs, root only looks at /home/<user> itself); a home that is still there is refused,
+ * since symlinks its user left behind still lead elsewhere. `as` says what is refused: a probe (the plan
+ * stops) or an apply step (it fails).
+ */
+export function asHomeUser(user: string, path: string, script: string, gone: string, as: "probe" | "apply"): string {
+  const home = q(`/home/${user}`);
+  const why = `refusing to touch ${path} as root: user ${user} does not exist, but /home/${user} is still there`;
+  const refuse = as === "probe" ? `echo ${q(`${REFUSED} ${why}`)}` : `echo ${q(why)} >&2; exit 1`;
+  return `if id -u ${q(user)} >/dev/null 2>&1; then ${asUser(user, script)}; elif [ ! -e ${home} ] && [ ! -L ${home} ]; then ${gone}; else ${refuse}; fi`;
+}
 
 // ---- constructors ---------------------------------------------------------------
 
@@ -141,17 +160,19 @@ export function file(path: string, content: string, o: FileOpts): Resource {
   const user = o.user ?? "root:root";
   const [u, g] = user.split(":");
   ownHome(path, u!);
+  const h = homeUser(path);
+  const probe = `if [ -f ${q(path)} ] && [ ! -L ${q(path)} ]; then echo "$(sha256sum < ${q(path)} | cut -c1-64) $(stat -c '%a %U:%G' ${q(path)})"; else echo missing; fi`;
   return {
     id: `file:${path}`,
     kind: "file",
     path,
     summary: o.summary ?? path,
     owner: o.owner,
-    probe: `if [ -f ${q(path)} ] && [ ! -L ${q(path)} ]; then echo "$(sha256sum < ${q(path)} | cut -c1-64) $(stat -c '%a %U:%G' ${q(path)})"; else echo missing; fi`,
+    // in a home read and written by its user: root would follow a symlink the user put on the way
+    probe: h ? asHomeUser(h, path, probe, "echo missing", "probe") : probe,
     desired: `${sha256(content)} ${normMode(mode)} ${u}:${g ?? u}`,
-    apply: inHome(u, path)
-      ? // written by the user: root would write through a symlink the user put there
-        `${asUser(u!, `umask 077; mkdir -p "$(dirname ${q(path)})" && t=$(mktemp ${q(path + ".fornax.XXXXXX")}) && cat > "$t" && chmod ${mode} "$t" && mv -f "$t" ${q(path)}`)} < <(${emit(content)})`
+    apply: h
+      ? `${asHomeUser(h, path, `umask 077; mkdir -p "$(dirname ${q(path)})" && t=$(mktemp ${q(path + ".fornax.XXXXXX")}) && cat > "$t" && chmod ${mode} "$t" && mv -f "$t" ${q(path)}`, `echo ${q(`user ${h} does not exist: cannot write ${path}`)} >&2; exit 1`, "apply")} < <(${emit(content)})`
       : `fornax_write ${q(path)} ${q(mode)} ${q(u!)} ${q(g ?? u!)} ${q(o.handler ?? autoHandler(path))} < <(${emit(content)})`,
     handler: o.handler ?? autoHandler(path),
     content,
@@ -162,10 +183,9 @@ export function file(path: string, content: string, o: FileOpts): Resource {
 export function absent(path: string, o: { owner: string; handler?: string; recursive?: boolean; destructive?: boolean; summary?: string }): Resource {
   const probe = `if [ -e ${q(path)} ] || [ -L ${q(path)} ]; then echo present; else echo absent; fi`;
   const rm = `rm -${o.recursive ? "rf" : "f"} ${q(path)}`;
-  const h = homeOf(path);
-  // in a home, looked at and removed by its user: as root, rm follows a directory the user swapped for a
-  // symlink. The backup is the user's tar of it — never put back as root, so not in the restore list
-  const home = h && h !== "root";
+  // in a home, looked at, backed up and removed by its user: as root, rm follows a directory the user swapped
+  // for a symlink. The backup is the user's tar of it — never put back as root, so not in the restore list
+  const h = homeUser(path);
   const tar = `[ -e ${q(path)} ] || [ -L ${q(path)} ] || exit 0; cd -- "$(dirname ${q(path)})" && tar -cf - -- "$(basename ${q(path)})"`;
   return {
     id: `absent:${path}`,
@@ -173,10 +193,10 @@ export function absent(path: string, o: { owner: string; handler?: string; recur
     path,
     summary: o.summary ?? `remove ${path}`,
     owner: o.owner,
-    probe: home ? asHomeUser(h, probe) : probe,
+    probe: h ? asHomeUser(h, path, probe, "echo absent", "probe") : probe,
     desired: "absent",
-    apply: home
-      ? `b="$BK/$(printf '%s' ${q(path)} | tr '/' '_').tar"; ( umask 077; ${asHomeUser(h, tar)} > "$b" ); [ -s "$b" ] || rm -f "$b"; ${asHomeUser(h, rm)}`
+    apply: h
+      ? `b="$BK/$(printf '%s' ${q(path)} | tr '/' '_').tar"; ( umask 077; ${asHomeUser(h, path, tar, ":", "apply")} > "$b" ); [ -s "$b" ] || rm -f "$b"; ${asHomeUser(h, path, rm, ":", "apply")}`
       : `fornax_nohome ${q(path)}; fornax_backup ${q(o.handler ?? autoHandler(path))} ${q(path)}; ${rm}`,
     handler: o.handler ?? autoHandler(path),
     destructive: o.destructive,
@@ -204,16 +224,18 @@ export function dir(path: string, o: { owner: string; mode?: string; user?: stri
   const user = o.user ?? "root:root";
   const [u, g] = user.split(":");
   ownHome(path, u!);
+  const h = homeUser(path);
+  const probe = `if [ -d ${q(path)} ]; then stat -c '%a %U:%G' ${q(path)}; else echo missing; fi`;
   return {
     id: `dir:${path}`,
     kind: "dir",
     path,
     summary: `directory ${path}`,
     owner: o.owner,
-    probe: `if [ -d ${q(path)} ]; then stat -c '%a %U:%G' ${q(path)}; else echo missing; fi`,
+    probe: h ? asHomeUser(h, path, probe, "echo missing", "probe") : probe,
     desired: `${normMode(mode)} ${u}:${g ?? u}`,
     // install -o chowns the target of a symlink: inside a user's home the user creates it
-    apply: inHome(u, path) ? asUser(u!, `install -d -m ${mode} ${q(path)}`) : `install -d -m ${mode} -o ${q(u!)} -g ${q(g ?? u!)} ${q(path)}`,
+    apply: h ? asHomeUser(h, path, `install -d -m ${mode} ${q(path)}`, `echo ${q(`user ${h} does not exist: cannot create ${path}`)} >&2; exit 1`, "apply") : `install -d -m ${mode} -o ${q(u!)} -g ${q(g ?? u!)} ${q(path)}`,
   };
 }
 
@@ -262,6 +284,12 @@ export function check(id: string, summary: string, test: string, run: string, o:
     flushBefore: o.flushBefore,
     destructive: o.destructive,
   };
+}
+
+/** A check whose test looks at `path` in `user`'s home: tested as that user (see asHomeUser); `gone` is its state without the home. */
+export function homeCheck(user: string, path: string, id: string, summary: string, test: string, run: string, gone: "ok" | "missing", o: Parameters<typeof check>[4]): Resource {
+  const c = check(id, summary, test, run, o);
+  return { ...c, probe: asHomeUser(user, path, c.probe, `echo ${gone}`, "probe") };
 }
 
 /** Always part of the desired state: no reloads may be left over from an interrupted apply. */

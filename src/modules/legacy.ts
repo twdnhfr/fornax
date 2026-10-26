@@ -100,7 +100,12 @@ rm -f /etc/sudoers.d/anvil-hook
 id -u anvil-hook >/dev/null 2>&1 && ! id -u fornax-hook >/dev/null 2>&1 && { usermod -l fornax-hook anvil-hook; groupmod -n fornax-hook anvil-hook; }
 true`;
 
-const LATE = `rm -rf ${LEGACY_GLOBS.filter((g) => !g.startsWith("/etc/redis")).join(" ")}
+const LATE = `rm -rf ${LEGACY_GLOBS.filter((g) => !g.startsWith("/etc/redis") && !g.startsWith("/home/")).join(" ")}
+# in a home as its user, as in EARLY
+for h in /home/*; do
+  [ -d "$h" ] && [ ! -L "$h" ] || continue
+  setpriv --reuid="$(stat -c %U "$h")" --regid="$(stat -c %G "$h")" --init-groups -- rm -rf "$h/.anvil" "$h/.ssh/anvil-deploy" "$h/.ssh/anvil-deploy.pub" || true
+done
 if [ -e /etc/redis/anvil.conf ]; then sed -i '\\#^include /etc/redis/anvil.conf$#d' /etc/redis/redis.conf; rm -f /etc/redis/anvil.conf /etc/redis/anvil-auth.conf; fi
 id -u anvil-hook >/dev/null 2>&1 && userdel anvil-hook
 # the services that read the removed files reload — each config checked first

@@ -2,7 +2,7 @@ import { basename, isAbsolute, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { fail } from "../core/errors.ts";
 import { siteRedis, type ResolvedSite } from "../core/fleet.ts";
-import { absent, check, dir, file, packages, service, symlink, type Resource } from "../core/resource.ts";
+import { absent, check, dir, file, homeCheck, homeUser, packages, service, symlink, type Resource } from "../core/resource.ts";
 import type { Daemon, Site } from "../core/schema.ts";
 import { DEPLOY_LOG_DIR, NODE_UPSTREAM_DIR, nodeSlots, nodeUpstreamConf, SITE_LOG_DIR, type NodeRuntime } from "../core/runtime.ts";
 import { asUser, q, sha256 } from "../core/shell.ts";
@@ -440,18 +440,21 @@ function envBootstrap(ctx: ModuleCtx, s: ResolvedSite, o: { owner: string }): Re
       : ["CACHE_STORE=file", "QUEUE_CONNECTION=database", "SESSION_DRIVER=file"]),
   ];
   const env = `${s.root}/.env`;
-  return check(
+  return homeCheck(
+    s.user,
+    env,
     `env:${s.domain}`,
     `bootstrap ${env} (only if missing; afterwards it is yours — fornax env pull|push)`,
     `[ -f ${q(env)} ]`,
     // checked again at apply time: an .env that exists by then is the app's and is never replaced
     // root reads the secrets, the site user writes the file (noclobber: an .env that appeared meanwhile stays)
-    `if [ ! -f ${q(env)} ]; then
+    `if ${asUser(s.user, `[ ! -f ${q(env)} ]`)}; then
 cat <<ENV | ${asUser(s.user, `umask 027; set -C; cat > ${q(env)} && chmod 0640 ${q(env)}`)}
 ${lines.join("\n")}
 ENV
 ${db ? "" : asUser(s.user, `mkdir -p ${q(s.root + "/storage")} && touch ${q(s.root + "/storage/database.sqlite")}`)}
 fi`,
+    "missing",
     o,
   );
 }
@@ -536,13 +539,16 @@ function logResources(s: ResolvedSite, o: { owner: string }): Resource[] {
     dir(SITE_LOG_DIR(u), { ...o, mode: "0750", user: `root:${u}` }),
     dir(dest, { ...o, mode: "0750", user: `root:${u}` }),
     // earlier versions wrote deploy logs into the home: the user hands over its regular files, nothing else comes along
-    check(
+    homeCheck(
+      u,
+      old,
       `deploy-logs:${u}`,
       `move the deploy history of ${s.domain} from ${old} to ${dest}`,
       `[ ! -e ${q(old)} ] && [ ! -L ${q(old)} ]`,
       `${asUser(u, `cd ${q(old)} && find . -maxdepth 1 -type f \\( -name '*.log' -o -name '*.json' \\) -print0 | tar --null --no-recursion -cf - -T -`)} | tar -xf - -C ${q(dest)} --no-same-owner
 find ${q(dest)} -mindepth 1 ! -type f -delete
 ${asUser(u, `rm -rf ${q(old)}`)}`,
+      "ok",
       o,
     ),
   ];
@@ -581,7 +587,7 @@ if [ "$(id -u ${q(u)})" -lt 1000 ]; then echo "${u} is a system account — refu
     const write = asUser(s.user, `mkdir -p ${q(s.root)} && umask 077 && printf %s "$FORNAX_SECRET_COMPOSER_AUTH" > ${q(path)} && chmod 0600 ${q(path)}`, ["FORNAX_SECRET_COMPOSER_AUTH"]);
     r.push(
       auth.ref
-        ? { ...check(`composer-auth:${s.domain}`, `composer auth.json for ${s.domain} (from ${auth.ref})`, `[ "$(sha256sum < ${q(path)} 2>/dev/null | cut -c1-64)" = ${q(sha256(auth.value))} ]`, write, o), env: { FORNAX_SECRET_COMPOSER_AUTH: auth.ref } }
+        ? { ...homeCheck(s.user, path, `composer-auth:${s.domain}`, `composer auth.json for ${s.domain} (from ${auth.ref})`, `[ "$(sha256sum < ${q(path)} 2>/dev/null | cut -c1-64)" = ${q(sha256(auth.value))} ]`, write, "missing", o), env: { FORNAX_SECRET_COMPOSER_AUTH: auth.ref } }
         : file(path, auth.value, { ...o, mode: "0600", user: `${s.user}:${s.user}` }),
     );
   }
@@ -666,7 +672,8 @@ function removeSite(ctx: ModuleCtx, s: ResolvedSite): Resource[] {
     absent(`/etc/logrotate.d/fornax-${s.slug}`, o),
     absent(`/etc/fornax/sites/${s.domain}.json`, o),
     absent(`/etc/fornax/hook-secrets/${s.domain}`, o),
-    ...s.spec.files.map((f) => absent(f.path, o)),
+    // with purge the whole home goes with its user (also one whose user is gone already)
+    ...s.spec.files.filter((f) => !(s.spec.purge && homeUser(f.path) === s.user)).map((f) => absent(f.path, o)),
     // the user's Redis stays when a site that is still here runs as the same user (a site moved to a new name)
     ...(ctx.sites.some((x) => x.user === s.user && x.spec.state === "present") ? [] : redisResources(s, o)),
   ];
@@ -688,7 +695,8 @@ function removeSite(ctx: ModuleCtx, s: ResolvedSite): Resource[] {
       );
     }
     r.push(
-      check(`deluser:${s.user}`, `DELETE Linux user ${s.user} and /home/${s.user} (all releases, storage, .env, its Redis data)`, `! id -u ${q(s.user)}`, `if [ "$(id -u ${q(s.user)})" -lt 1000 ]; then echo "${s.user} is a system account — not deleting it" >&2; false; else pkill -u ${q(s.user)} || true; userdel -r ${q(s.user)} 2>/dev/null || true; rm -rf /home/${s.user} ${SITE_LOG_DIR(s.user)} ${siteRedis(s.user).data}; fi`, destructive),
+      // rm -rf removes links in the home as links, never what they point to
+      check(`deluser:${s.user}`, `DELETE Linux user ${s.user} and /home/${s.user} (all releases, storage, .env, its Redis data)`, `! id -u ${q(s.user)} && [ ! -e /home/${s.user} ] && [ ! -L /home/${s.user} ]`, `if id -u ${q(s.user)} >/dev/null 2>&1 && [ "$(id -u ${q(s.user)})" -lt 1000 ]; then echo "${s.user} is a system account — not deleting it" >&2; false; else pkill -u ${q(s.user)} || true; userdel -r ${q(s.user)} 2>/dev/null || true; rm -rf /home/${s.user} ${SITE_LOG_DIR(s.user)} ${siteRedis(s.user).data}; fi`, destructive),
       absent(dbSecret(s), { ...o, destructive: true }),
     );
     if (s.tlsIssuer === "letsencrypt") r.push(check(`certdel:${s.domain}`, `delete certificate ${s.domain}`, `[ ! -d /etc/letsencrypt/live/${s.domain} ]`, `certbot delete --cert-name ${q(s.domain)} --non-interactive`, o));

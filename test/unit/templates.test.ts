@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { loadFleet, resolveSite, sites } from "../../src/core/fleet.ts";
 import { applyScript, computeChanges, parseProbe, probeScript } from "../../src/core/plan.ts";
-import { absent, file, packages } from "../../src/core/resource.ts";
+import { absent, file, packages, REFUSED } from "../../src/core/resource.ts";
 import { assertOrder, desired } from "../../src/modules/index.ts";
 import { cronConf, daemonConf, poolConf, vhostConf } from "../../src/modules/site.ts";
 import { ufwRules } from "../../src/modules/server.ts";
@@ -120,6 +120,24 @@ describe("paths in a home", () => {
     expect(() => file("/home/shop/x.conf", "x", { owner: "t" })).toThrow("must belong to shop");
     expect(() => file("/home/shop/../docs/x.conf", "x", { owner: "t", user: "shop:shop" })).toThrow("home of docs");
     expect(file("/home/shop/x.conf", "x", { owner: "t", user: "shop:shop" }).apply).toContain("--reuid='shop'");
+  });
+});
+
+describe("homes without their user", () => {
+  test("a probe that refuses to look stops the plan, naming user and path", () => {
+    const r = absent("/home/shop/conf/old.ini", { owner: "t" });
+    const out = `\n@@0\n${REFUSED} refusing to touch /home/shop/conf/old.ini as root: user shop does not exist, but /home/shop is still there\n@@end\n`;
+    expect(() => parseProbe(out, [r])).toThrow("user shop does not exist");
+  });
+  test("a site purge removes its home as a whole, not file by file", () => {
+    const files = [{ path: `/home/${shop.user}/x.ini`, content: "x", mode: "0644", owner: `${shop.user}:${shop.user}`, handler: "auto" }, { path: "/etc/shop.ini", content: "x", mode: "0644", owner: "root:root", handler: "auto" }];
+    const gone = (purge: boolean) => {
+      const spec = { ...server.sites["shop.example.com"]!, state: "absent", purge, files };
+      return desired(fleet, { ...server, sites: { ...server.sites, "shop.example.com": spec } } as typeof server, ctx.facts).map((x) => x.id);
+    };
+    expect(gone(true)).not.toContain(`absent:/home/${shop.user}/x.ini`);
+    expect(gone(true)).toContain("absent:/etc/shop.ini");
+    expect(gone(false)).toContain(`absent:/home/${shop.user}/x.ini`);
   });
 });
 

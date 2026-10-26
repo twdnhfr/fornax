@@ -77,6 +77,7 @@ Without `--json` it goes to stderr as `error [<code>]: <message>`, followed by `
 | `secrets_sync_failed` | the apply happened; copying its secrets to 1Password did not |
 | `ssh_failed`, `ssh_timeout`, `ssh_key_invalid`, `security_key`, `sudo_failed` | connecting to the server failed (the hint says why) |
 | `remote_failed`, `upload_failed`, `probe_failed` | a script or upload on the server failed |
+| `home_without_user` | a site user is gone but its home is still there: fornax does not look inside it as root (links the user left could lead anywhere) — remove the home or create the user again |
 | `unsupported_os`, `legacy_layout` | the server runs an unsupported OS, or was set up under fornax's old name (one full plan + apply moves it) |
 | `plan_stale`, `plan_expired`, `upload_missing`, `apply_locked`, `nothing_to_apply` | the plan cannot be applied as it is: make a new one, or wait for the other apply |
 | `apply_failed`, `validation_failed` | a step of the apply failed on the server (`details` names the step and the log), or nginx, PHP-FPM, sshd or sudoers rejected the new config and the previous files were restored |

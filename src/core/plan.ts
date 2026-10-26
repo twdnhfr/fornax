@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FornaxError, fail } from "./errors.ts";
 import { isProtected, secret, stateDir, type Fleet } from "./fleet.ts";
-import { APPLY_LIB, HANDLERS, handlerFor, type Resource } from "./resource.ts";
+import { APPLY_LIB, HANDLERS, handlerFor, homeUser, REFUSED, type Resource } from "./resource.ts";
 import type { Server } from "./schema.ts";
-import { b64, q } from "./shell.ts";
+import { asUser, b64, q } from "./shell.ts";
 import { runnerFor, tail } from "./ssh.ts";
 import { actor, etcCommit, etcCommitOutside, fleetRevision, fornaxMessage } from "./etc-history.ts";
 import { BUILD, VERSION } from "./version.ts";
@@ -77,6 +77,9 @@ export function parseProbe(out: string, resources: Resource[]): Record<string, s
   }
   flush();
   for (const r of resources) if (!(r.id in states)) fail("probe_failed", `probe output incomplete (no state for ${r.id})`);
+  // a probe that would have to look as root where only a user may (asHomeUser): nothing is planned around it
+  const refused = Object.values(states).flatMap((v) => v.split("\n")).filter((l) => l.startsWith(REFUSED + " ")).map((l) => l.slice(REFUSED.length + 1));
+  if (refused.length) fail("home_without_user", refused.join("\n"), "the user is gone but its home is not: remove the home (or create the user again), then plan again", undefined, { refused });
   return states;
 }
 
@@ -357,9 +360,14 @@ export async function contentDiffs(fleet: Fleet, server: Server, resources: Reso
     .map((c) => resources.find((r) => r.id === c.id)!)
     .filter((r) => !r.sensitive && r.path);
   if (!files.length) return {};
-  // only a file reached without any symlink on the way: one a site user planted must not show root's files
-  const script =
-    files.map((r, i) => `printf '\\n@@${i}\\n'; [ -f ${q(r.path!)} ] && [ "$(realpath -e ${q(r.path!)})" = ${q(r.path!)} ] && base64 -w0 ${q(r.path!)}; echo`).join("\n") + "\nprintf '\\n@@end\\n'";
+  // only a file reached without any symlink on the way, and one in a home read by its user (none without
+  // that user): one a site user planted must not show root's files
+  const read = (p: string) => `[ -f ${q(p)} ] && [ "$(realpath -e ${q(p)})" = ${q(p)} ] && base64 -w0 ${q(p)}`;
+  const readAs = (p: string) => {
+    const h = homeUser(p);
+    return h ? `id -u ${q(h)} >/dev/null 2>&1 && ${asUser(h, read(p))}` : read(p);
+  };
+  const script = files.map((r, i) => `printf '\\n@@${i}\\n'; ${readAs(r.path!)}; echo`).join("\n") + "\nprintf '\\n@@end\\n'";
   const out = await runnerFor(fleet, server).run(script);
   const parsed = parseProbe(out.stdout, files);
   const dir = mkdtempSync(join(tmpdir(), "fornax-diff-"));

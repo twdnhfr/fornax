@@ -258,21 +258,33 @@ defineCommand({
 
 // ---- explain ------------------------------------------------------------------
 
-function siteProbe(site: ResolvedSite): string {
-  return `${FACT_FN}
-id -u ${site.user} >/dev/null 2>&1 && fact user_exists yes || fact user_exists no
+/**
+ * Live facts about a site. What lies in the site's tree (`current`, releases, .env, the git checkout, node
+ * slot links, disk use) is looked at as the site user only — a link there must not lead root anywhere;
+ * without that user the tree is not entered at all. The rest (nginx, PHP-FPM, supervisor, systemd, cron) as root.
+ */
+export function siteProbe(site: ResolvedSite): string {
+  const tree = `${FACT_FN}
 if [ -L ${q(site.current)} ]; then
   r=$(readlink -f ${q(site.current)}); fact current "$r"; fact current_age_s "$(( $(date +%s) - $(stat -c %Y "$r") ))"
-  [ -d "$r/.git" ] && { fact sha "$(git -c safe.directory='*' -C "$r" rev-parse HEAD 2>/dev/null)"; fact remote "$(git -c safe.directory='*' -C "$r" config --get remote.origin.url 2>/dev/null)"; }
+  [ -d "$r/.git" ] && { fact sha "$(git -C "$r" rev-parse HEAD 2>/dev/null)"; fact remote "$(git -C "$r" config --get remote.origin.url 2>/dev/null)"; }
 fi
 [ -d ${q(site.root)}/releases ] && fact releases "$(ls -1 ${q(site.root)}/releases | wc -l)"
 [ -f ${q(site.root)}/.env ] && fact env yes || fact env no
+${(site.node ? nodeSlots(site, site.node.ports).slots : []).map((x) => `fact node_release "${x.name} $(readlink ${q(x.link)} 2>/dev/null)"\n`).join("")}fact disk "$(du -sh /home/${site.user} 2>/dev/null | cut -f1)"
+true`;
+  return `${FACT_FN}
+if id -u ${q(site.user)} >/dev/null 2>&1; then
+  fact user_exists yes
+  ${asUser(site.user, tree)}
+else
+  fact user_exists no
+fi
 [ -e /etc/nginx/sites-enabled/${site.domain} ] && fact vhost /etc/nginx/sites-enabled/${site.domain}
 for f in /etc/php/${site.php}/fpm/pool.d/*.conf; do grep -qE "^user *= *${site.user}$" "$f" 2>/dev/null && { fact pool "$f"; fact socket "$(grep -E '^listen *=' "$f" | cut -d= -f2 | tr -d ' ')"; }; done
 for c in $(grep -lsE '^user=${site.user}$' /etc/supervisor/conf.d/*.conf); do fact daemon_conf "$c"; done
 command -v supervisorctl >/dev/null && for p in $(grep -hsE '^\\[program:' $(grep -lsE '^user=${site.user}$' /etc/supervisor/conf.d/*.conf) </dev/null | sed 's/\\[program:\\(.*\\)\\]/\\1/'); do fact daemon "$(supervisorctl status "$p:*" 2>/dev/null | awk '{print $1" "$2}' | tr '\\n' ';')"; done
-${(site.node ? nodeSlots(site, site.node.ports).slots : []).map((x) => `e=$(systemctl is-enabled ${x.unit} 2>/dev/null || true); a=$(systemctl is-active ${x.unit} 2>/dev/null || true); fact node_slot "${x.name} ${x.port} \${e:-none} \${a:-none} $(readlink ${q(x.link)} 2>/dev/null)"\n`).join("")}grep -hsE "^[^#].*[[:space:]]${site.user}[[:space:]]" /etc/crontab /etc/cron.d/* | while read -r l; do fact cron "$l"; done
-fact disk "$(du -sh /home/${site.user} 2>/dev/null | cut -f1)"
+${(site.node ? nodeSlots(site, site.node.ports).slots : []).map((x) => `e=$(systemctl is-enabled ${x.unit} 2>/dev/null || true); a=$(systemctl is-active ${x.unit} 2>/dev/null || true); fact node_slot "${x.name} ${x.port} \${e:-none} \${a:-none}"\n`).join("")}grep -hsE "^[^#].*[[:space:]]${site.user}[[:space:]]" /etc/crontab /etc/cron.d/* | while read -r l; do fact cron "$l"; done
 true
 `;
 }
@@ -349,7 +361,8 @@ defineCommand({
         ...(site.node
           ? {
               node_slots: all(f, "node_slot").map((l) => {
-                const [slot, port, enabled, active, release] = l.split(" ");
+                const [slot, port, enabled, active] = l.split(" ");
+                const release = all(f, "node_release").find((x) => x.split(" ")[0] === slot)?.split(" ")[1];
                 return { slot, port: Number(port), enabled: enabled === "enabled", active, release: release || null };
               }),
             }

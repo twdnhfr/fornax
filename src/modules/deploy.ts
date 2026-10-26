@@ -1,5 +1,5 @@
 import type { ResolvedSite } from "../core/fleet.ts";
-import { absent, check, dir, file, service, symlink, type Resource } from "../core/resource.ts";
+import { absent, check, dir, file, homeCheck, service, symlink, type Resource } from "../core/resource.ts";
 import { DEPLOY_KEY, GITHUB_HOST_KEY, HOOK_SECRET_DIR, KNOWN_HOSTS, NTFY_TOKEN_FILE, REQUEST_DIR, RUNTIME_DIR, siteRuntime } from "../core/runtime.ts";
 import { asUser, q, sha256 } from "../core/shell.ts";
 import { ORDER_KEY_AWK, orderKey, VERSION } from "../core/version.ts";
@@ -183,12 +183,16 @@ export function deploySiteResources(ctx: ModuleCtx, s: ResolvedSite): Resource[]
   if (rt.uses_deploy_key) {
     const key = DEPLOY_KEY(s.user);
     r.push(
-      check(
+      homeCheck(
+        s.user,
+        key,
         `deploy-key:${s.domain}`,
         `deploy key ${key} (read-only access to ${s.spec.repo})`,
-        `[ -f ${q(key)} ]`,
+        // a key counts only if the user can read it: one behind a link to root's files does not
+        `[ -f ${q(key)} ] && [ -r ${q(key)} ]`,
         // a key that exists by now (moved from the old name in the same apply) is the one GitHub knows
-        asUser(s.user, `install -d -m 0700 /home/${s.user}/.ssh && { [ -f ${q(key)} ] || ssh-keygen -q -t ed25519 -N '' -C ${q(`fornax deploy ${s.domain}`)} -f ${q(key)}; }`),
+        asUser(s.user, `install -d -m 0700 /home/${s.user}/.ssh && { { [ -f ${q(key)} ] && [ -r ${q(key)} ]; } || ssh-keygen -q -t ed25519 -N '' -C ${q(`fornax deploy ${s.domain}`)} -f ${q(key)} </dev/null; }`),
+        "missing",
         o,
       ),
     );

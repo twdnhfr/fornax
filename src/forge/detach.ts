@@ -14,12 +14,33 @@ import { editServerFile, type Fleet } from "../core/fleet.ts";
 import { all, FACT_FN, one, parseFacts } from "../core/probe.ts";
 import { absent, check, type Resource } from "../core/resource.ts";
 import type { Server } from "../core/schema.ts";
+import { q } from "../core/shell.ts";
 import { runnerFor } from "../core/ssh.ts";
 import type { ModuleCtx } from "../modules/common.ts";
 
 const WORKER_KEY = "worker@forge.laravel.com";
 const CLEANUP = "/root/forge-cleanup.sh";
-const KEY_FILES = "/root/.ssh/authorized_keys /home/*/.ssh/authorized_keys";
+const ROOT_KEYS = "/root/.ssh/authorized_keys";
+const DROP_KEY = `sed -i -e '/[[:space:]]worker@forge\\.laravel\\.com[[:space:]]*$/d' -e '/^# Laravel Forge$/d'`;
+
+/**
+ * Shell: `body` once per home in /home, run as the owner of that home with the home as $1 — root only looks
+ * at /home/<name> itself. A home owned by root, or by a uid without an account, is not entered (`orphan`
+ * runs with $h instead): links left there could lead anywhere.
+ */
+export function asEachHomeOwner(body: string, orphan = ":"): string {
+  return `for h in /home/*; do
+  [ -d "$h" ] && [ ! -L "$h" ] || continue
+  uid=$(stat -c %u -- "$h") && gid=$(stat -c %g -- "$h") || continue
+  [ "$uid" -ne 0 ] || continue
+  u=$(getent passwd "$uid" | cut -d: -f1) || u=""
+  if [ -z "$u" ]; then ${orphan}; continue; fi
+  ( cd / && env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME="$h" LANG=C.UTF-8 setpriv --reuid="$uid" --regid="$gid" --init-groups -- bash -c ${q(body)} _ "$h" )
+done`;
+}
+
+/** As a home's owner: its own authorized_keys (not one reached through a link) if it holds Forge's key. */
+const HOME_KEYS = `k="$1/.ssh/authorized_keys"; [ ! -L "$1/.ssh" ] && [ -f "$k" ] && [ ! -L "$k" ] && grep -qF ${WORKER_KEY} "$k" && echo "$k"; true`;
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 const isCleanupJob = (l: string) => l.includes("forge-cleanup.sh") && !l.trim().startsWith("#");
 
@@ -45,14 +66,20 @@ export async function forgeIps(): Promise<string[]> {
   return text.split(/\s+/).filter((ip) => IPV4.test(ip));
 }
 
-const PROBE = `${FACT_FN}
+export const PROBE = `${FACT_FN}
 if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
   ufw status | awk '$1 ~ /^22(\\/tcp)?$/ && $2 == "ALLOW" { ip = ($3 == "IN") ? $4 : $3; if (ip ~ /^[0-9.]+$/ && ip != "127.0.0.1") print ip }' | while read -r ip; do fact ssh_rule "$ip"; done
 fi
-grep -lsF ${WORKER_KEY} ${KEY_FILES} | while read -r f; do fact worker_key "$f"; done
+grep -lsF ${WORKER_KEY} ${ROOT_KEYS} | while read -r f; do fact worker_key "$f"; done
 command -v mysql >/dev/null && fact mysql_forge "$(mysql -N -e "select count(*) from mysql.user where user = 'forge'" 2>/dev/null || echo ?)"
-grep -lsE '^DB_USERNAME="?forge"?$' /home/*/*/.env 2>/dev/null | while read -r f; do fact env_forge_user "$f"; done
-ls -d /home/*/.forge 2>/dev/null | while read -r d; do fact forge_dir "$d"; done
+# what lies in the homes is looked at by their owners, each seeing only its own files
+${asEachHomeOwner(
+  `{ ${HOME_KEYS}; } | sed 's/^/worker_key\t/'
+for f in "$1"/*/.env; do [ -f "$f" ] && [ ! -L "$f" ] && grep -qsE '^DB_USERNAME="?forge"?$' "$f" && printf 'env_forge_user\t%s\n' "$f"; done
+[ -d "$1/.forge" ] && [ ! -L "$1/.forge" ] && printf 'forge_dir\t%s\n' "$1/.forge"
+true`,
+  'fact skipped_home "$h"',
+)}
 for f in /etc/sudoers.d/*; do case "$(basename "$f")" in fornax-*|README|90-cloud-init-users) ;; *) fact sudoers "$f";; esac; done
 ls /etc/apt/sources.list.d/ 2>/dev/null | grep '^laravelphp-ubuntu-forge' | while read -r f; do fact ppa "$f"; done
 [ -f ${CLEANUP} ] && fact cleanup yes
@@ -108,6 +135,8 @@ export async function detachServer(fleet: Fleet, server: Server, o: { force?: bo
   if (sudoers.length) res.warnings.push(`Forge's sudoers files stay (they only grant the forge user service reloads): ${sudoers.join(", ")}`);
   const dirs = all(f, "forge_dir");
   if (dirs.length) res.warnings.push(`Forge's logs stay in ${dirs.join(", ")} — nothing cleans them up any more`);
+  const skipped = all(f, "skipped_home");
+  if (skipped.length) res.warnings.push(`not looked into (no account owns them, and root does not go in): ${skipped.join(", ")} — remove Forge's key there by hand if it is in one`);
 
   // a worker key the fleet itself lists for root would come straight back with the next apply
   const isWorker = (k: unknown) => String(k).includes(WORKER_KEY);
@@ -137,11 +166,10 @@ export function detachResources(ctx: ModuleCtx): Resource[] {
     check(
       "forge:worker-key",
       "remove Forge's worker key from authorized_keys (root and every user)",
-      `! grep -qsF ${WORKER_KEY} ${KEY_FILES}`,
-      `for f in ${KEY_FILES}; do
-  [ -f "$f" ] && grep -qF ${WORKER_KEY} "$f" || continue
-  sed -i -e '/[[:space:]]worker@forge\\.laravel\\.com[[:space:]]*$/d' -e '/^# Laravel Forge$/d' "$f"
-done`,
+      `! grep -qsF ${WORKER_KEY} ${ROOT_KEYS} && [ -z "$(${asEachHomeOwner(HOME_KEYS)})" ]`,
+      // root edits root's file only; every home's is edited by its owner
+      `if grep -qsF ${WORKER_KEY} ${ROOT_KEYS}; then ${DROP_KEY} ${ROOT_KEYS}; fi
+${asEachHomeOwner(`k=$(${HOME_KEYS}); [ -z "$k" ] || ${DROP_KEY} "$k"`)}`,
       o,
     ),
   ];

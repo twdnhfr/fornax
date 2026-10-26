@@ -312,7 +312,10 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
     run(`git clone --quiet --depth 1 --branch '${rt.branch}' '${rt.repo_url}' '${dir}'`, { env: gitSsh });
     if (request?.sha) {
       const head = run(`git -C '${dir}' rev-parse HEAD`).out.trim();
-      if (!head.startsWith(request.sha)) run(`git -C '${dir}' fetch --quiet --depth 1 origin '${request.sha}' && git -C '${dir}' checkout --quiet FETCH_HEAD`, { env: gitSsh });
+      if (!head.startsWith(request.sha)) {
+        if (request.source === "webhook") log(stale(request.sha, head));
+        else run(`git -C '${dir}' fetch --quiet --depth 1 origin '${request.sha}' && git -C '${dir}' checkout --quiet FETCH_HEAD`, { env: gitSsh });
+      }
     }
     result.sha = run(`git -C '${dir}' rev-parse HEAD`).out.trim();
 
@@ -419,8 +422,14 @@ async function releaseLocked(domain: string, rt: SiteRuntime, o: { rollback?: bo
     } else {
       log(`=> deploying ${domain} in place (${rt.repo_url} ${request?.sha ?? rt.branch}) in ${dir}`);
       git(`fetch --quiet '${rt.repo_url}' '${rt.branch}'`);
-      target = request?.sha ?? git("rev-parse FETCH_HEAD").out.trim();
-      if (request?.sha && git(`cat-file -e '${target}^{commit}'`, { allowFail: true }).code !== 0) git(`fetch --quiet '${rt.repo_url}' '${target}'`);
+      const head = git("rev-parse FETCH_HEAD").out.trim();
+      let wanted = request?.sha;
+      if (wanted && request?.source === "webhook" && !head.startsWith(wanted)) {
+        log(stale(wanted, head));
+        wanted = undefined;
+      }
+      target = wanted ?? head;
+      if (wanted && git(`cat-file -e '${target}^{commit}'`, { allowFail: true }).code !== 0) git(`fetch --quiet '${rt.repo_url}' '${target}'`);
     }
     const checkout = (sha: string) => {
       git(`reset --quiet --hard '${sha}'`);
@@ -605,6 +614,12 @@ function pruneDeployLogs(dir: string) {
     for (const ext of [".log", ".json"]) rmSync(join(dir, run + ext), { force: true });
   }
 }
+
+/**
+ * A push deploys its commit only while that is the head of the branch: a recorded, validly signed
+ * request sent again (the signature covers the body only) must not bring back an old commit.
+ */
+const stale = (sha: string, head: string) => `=> ${sha.slice(0, 12)} from the webhook is no longer the head of the branch — deploying the head, ${head.slice(0, 12)}`;
 
 interface DeployRequest {
   sha?: string;

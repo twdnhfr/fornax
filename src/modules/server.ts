@@ -338,6 +338,25 @@ export const phpIni = (v: string, overrides: Record<string, string> = {}, sapi: 
   return `; ${HEADER}\n${Object.entries(ini).map(([k, val]) => `${k} = ${val}`).join("\n")}\n; PHP ${v}\n`;
 };
 
+/**
+ * Bun's release key (Robobun <robobun@oven.sh>, F3DCC08A8572C0749B3E18888EAB4D40A7B22B59), as
+ * published at github.com/robobun.gpg and keys.openpgp.org. It signs every release's SHASUMS256.txt.
+ */
+const BUN_KEY =
+  "mDMEY9GQFhYJKwYBBAHaRw8BAQdAkppAqaXl0RkROz6NfdvlwYd2UuUVfHLk2NNYIzEdnT+0GVJvYm9idW4gPHJvYm9idW5Ab3Zlbi5zaD6IkwQTFgoAOxYhBPPcwIqFcsB0mz4YiI6rTUCnsitZBQJj0ZAWAhsDBQsJCAcCAiICBhUKCQgLAgQWAgMBAh4HAheAAAoJEI6rTUCnsitZ96UBAMvwCLD6Ud1RZkpvvnGUU+idHt2hcNmYU2d0XxDIHQ0rAQCA9VFOtjZefQkfhDzgIgnEEdSFXaMiyY+D+LP8awNMCrg4BGPRkBYSCisGAQQBl1UBBQEBB0BpfePYSOEx8PihYkNXjlK5YT89CGHjEK5etleaB9i6OwMBCAeIeAQYFgoAIBYhBPPcwIqFcsB0mz4YiI6rTUCnsitZBQJj0ZAWAhsMAAoJEI6rTUCnsitZvhAA/j4SQxOCLheRG86A2181WAP4qLS1qxSw+fCf28DgiPfbAQCL0kcel+M9qbRIlMnwn6TwlQgN9w1qqlSnA9CbKXT9Aw==";
+
+/** The latest Bun release, installed only once its zip matches the checksums Bun's key signed (what bun.sh/install never checks). */
+const BUN_INSTALL = `( d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
+case "$(uname -m)" in x86_64) a=x64; grep -qw avx2 /proc/cpuinfo || a=x64-baseline;; aarch64) a=aarch64;; *) echo "no bun build for $(uname -m)" >&2; exit 1;; esac
+rel="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/oven-sh/bun/releases/latest)"; tag="\${rel##*/}"
+case "$tag" in bun-v*) ;; *) echo "could not find the latest bun release" >&2; exit 1;; esac
+curl -fsSL "https://github.com/oven-sh/bun/releases/download/$tag/SHASUMS256.txt.asc" -o "$d/sums.asc"
+curl -fsSL "https://github.com/oven-sh/bun/releases/download/$tag/bun-linux-$a.zip" -o "$d/bun-linux-$a.zip"
+printf %s ${q(BUN_KEY)} | base64 -d > "$d/bun.gpg"
+gpgv --keyring "$d/bun.gpg" -o - "$d/sums.asc" > "$d/sums" 2>/dev/null || { echo "bun $tag: SHASUMS256.txt is not signed by Bun's release key" >&2; exit 1; }
+(cd "$d" && grep -E "^[0-9a-f]{64}  bun-linux-$a\\.zip$" sums | sha256sum -c --quiet --strict -) || { echo "bun $tag: checksum mismatch" >&2; exit 1; }
+unzip -q "$d/bun-linux-$a.zip" -d "$d" && install -m 0755 "$d/bun-linux-$a/bun" /usr/local/bin/bun && ln -sfn bun /usr/local/bin/bunx )`;
+
 export function php(ctx: ModuleCtx): Resource[] {
   const s = ctx.server;
   const o = { owner: "php" };
@@ -364,17 +383,18 @@ export function php(ctx: ModuleCtx): Resource[] {
         "composer",
         "composer in /usr/local/bin",
         "[ -x /usr/local/bin/composer ]",
-        `cd /tmp
+        // in a directory of root's own: in /tmp a site user could swap the installer between check and run
+        `( d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
 EXPECTED="$(curl -fsSL https://composer.github.io/installer.sig)"
-curl -fsSL https://getcomposer.org/installer -o composer-setup.php
-[ "$(php -r "echo hash_file('sha384', 'composer-setup.php');")" = "$EXPECTED" ] || { echo "composer installer checksum mismatch" >&2; exit 1; }
-php composer-setup.php --quiet --install-dir=/usr/local/bin --filename=composer; rm -f composer-setup.php`,
+curl -fsSL https://getcomposer.org/installer -o "$d/composer-setup.php"
+[ "$(php -r 'echo hash_file("sha384", $argv[1]);' "$d/composer-setup.php")" = "$EXPECTED" ] || { echo "composer installer checksum mismatch" >&2; exit 1; }
+TMPDIR="$d" php "$d/composer-setup.php" --quiet --install-dir="$d" --filename=composer && install -m 0755 "$d/composer" /usr/local/bin/composer )`,
         { ...o, flushBefore: true },
       ),
     );
   }
   if (s.tools.includes("bun")) {
-    r.push(check("bun", "bun in /usr/local/bin", "[ -x /usr/local/bin/bun ]", "curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash >/dev/null; rm -rf /usr/local/_bun 2>/dev/null; true", o));
+    r.push(check("bun", "bun in /usr/local/bin", "[ -x /usr/local/bin/bun ]", BUN_INSTALL, o));
   }
   if (s.tools.includes("node")) r.push(...aptRepo(ctx, REPOS.node!, "php"), packages("node", ["nodejs"], o));
   return r;

@@ -33,6 +33,25 @@ export const serverDeps: HookDeps = {
   },
 };
 
+/** GitHub sends at most 25 MB (nginx lets as much through). */
+export const MAX_BODY = 25 * 1024 * 1024;
+/** Bodies read at once: what unsigned junk can make the webhook hold in memory. */
+export const MAX_READS = 4;
+let reading = 0;
+
+/** The body, or null once it grows past `max` — read as it arrives, so a huge one is never held whole. */
+async function readBody(req: Request, max: number): Promise<Uint8Array | null> {
+  if (Number(req.headers.get("content-length") ?? 0) > max) return null;
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const c of req.body ?? []) {
+    size += c.length;
+    if (size > max) return null;
+    chunks.push(c);
+  }
+  return Buffer.concat(chunks);
+}
+
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body) + "\n", { status, headers: { "content-type": "application/json" } });
 
 export async function handleHook(req: Request, deps: HookDeps): Promise<Response> {
@@ -46,8 +65,18 @@ export async function handleHook(req: Request, deps: HookDeps): Promise<Response
   const rt = deps.runtimeFor(domain);
   if (!secret || !rt) return json(404, { error: "unknown site" });
 
-  const body = new Uint8Array(await req.arrayBuffer());
+  // what cannot be signed is turned away before its body is read
   const given = req.headers.get("x-hub-signature-256") ?? "";
+  if (!/^sha256=[0-9a-f]{64}$/.test(given)) return json(401, { error: "bad signature" });
+  if (reading >= MAX_READS) return json(503, { error: "busy" });
+  reading++;
+  let body: Uint8Array | null;
+  try {
+    body = await readBody(req, MAX_BODY);
+  } finally {
+    reading--;
+  }
+  if (!body) return json(413, { error: "body too large" });
   const expected = signature(secret, body);
   const a = Buffer.from(given);
   const b = Buffer.from(expected);

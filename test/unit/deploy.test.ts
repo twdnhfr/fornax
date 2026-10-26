@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { handleHook, type HookDeps } from "../../src/remote/hook.ts";
+import { handleHook, MAX_BODY, type HookDeps } from "../../src/remote/hook.ts";
 import { signature } from "../../src/remote/release.ts";
 import { repoUrl, type SiteRuntime } from "../../src/core/runtime.ts";
 import { GitHub, sameKey } from "../../src/githost/github.ts";
@@ -51,6 +51,22 @@ describe("webhook", () => {
     const started: Array<[string, string | undefined]> = [];
     const res = await handleHook(push({ ref: "refs/heads/main", after: sha, repository: { full_name: "evil/shop" } }), deps(started));
     expect(res.status).toBe(403);
+    expect(started).toEqual([]);
+  });
+  test("requests that cannot be signed or are too large are turned away before their body is read", async () => {
+    const started: Array<[string, string | undefined]> = [];
+    let read = false;
+    const body = new ReadableStream({ pull: () => void (read = true) }, { highWaterMark: 0 });
+    const unsigned = new Request("http://127.0.0.1/fornax/hook/shop.example.com", { method: "POST", body, headers: { "x-github-event": "push" } });
+    expect((await handleHook(unsigned, deps(started))).status).toBe(401);
+    expect(read).toBe(false);
+    // a body that keeps coming is cut off once it is larger than GitHub ever sends
+    const mb = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    const endless = new ReadableStream({ pull: (c) => void (sent++ < 100 ? c.enqueue(mb) : c.close()) });
+    const huge = new Request("http://127.0.0.1/fornax/hook/shop.example.com", { method: "POST", body: endless, headers: { "x-hub-signature-256": `sha256=${"0".repeat(64)}` } });
+    expect((await handleHook(huge, deps(started))).status).toBe(413);
+    expect(sent).toBeLessThan(MAX_BODY / mb.length + 5);
     expect(started).toEqual([]);
   });
   test("unknown sites are 404", async () => {

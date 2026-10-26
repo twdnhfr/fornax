@@ -73,6 +73,8 @@ chgrp ${q(grp)} ${q(path)}; chmod 0640 ${q(path)}`,
 export interface AptRepo {
   name: string;
   key: string;
+  /** Fingerprints of the key's primary keys: a downloaded key is installed only if it has exactly these. */
+  fingerprints: string[];
   /** Key is already binary (no `gpg --dearmor`). */
   binaryKey?: boolean;
   line: (keyring: string, codename: string, arch: "amd64" | "arm64") => string;
@@ -81,26 +83,31 @@ export interface AptRepo {
 export const REPOS: Record<string, AptRepo> = {
   nginx: {
     name: "nginx",
+    fingerprints: ["573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62", "8540A6F18833A80E9C1653A42FD21310B49F6B46", "9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3"],
     key: "https://nginx.org/keys/nginx_signing.key",
     line: (k, c) => `deb [signed-by=${k}] https://nginx.org/packages/mainline/ubuntu ${c} nginx`,
   },
   php: {
     name: "ondrej-php",
+    fingerprints: ["14AA40EC0831756756D7F66C4F4EA0AAE5267A6C"],
     key: "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x14AA40EC0831756756D7F66C4F4EA0AAE5267A6C",
     line: (k, c) => `deb [signed-by=${k}] https://ppa.launchpadcontent.net/ondrej/php/ubuntu ${c} main`,
   },
   node: {
     name: "nodesource",
+    fingerprints: ["6F71F525282841EEDAF851B42F59B5F99B1BE0B4"],
     key: "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key",
     line: (k) => `deb [signed-by=${k}] https://deb.nodesource.com/node_22.x nodistro main`,
   },
   redis: {
     name: "redis",
+    fingerprints: ["54318FA4052D1E61A6B6F7BB5F4349D6BF53AA0C"],
     key: "https://packages.redis.io/gpg",
     line: (k, c) => `deb [signed-by=${k}] https://packages.redis.io/deb ${c} main`,
   },
   crowdsec: {
     name: "crowdsec",
+    fingerprints: ["6A89E3C2303A901A889971D3376ED5326E93CD0C"],
     key: "https://packagecloud.io/crowdsec/crowdsec/gpgkey",
     // the distribution-independent channel: works on new Ubuntu releases from day one
     line: (k) => `deb [signed-by=${k}] https://packagecloud.io/crowdsec/crowdsec/any/ any main`,
@@ -108,25 +115,35 @@ export const REPOS: Record<string, AptRepo> = {
   // the 1Password CLI, for peers: a host reads the fleet's secrets with the token its client hands it per run
   onepassword: {
     name: "1password",
+    fingerprints: ["3FEF9748469ADBE15DA7CA80AC2D62742012EA22"],
     key: "https://downloads.1password.com/linux/keys/1password.asc",
     line: (k, _c, a) => `deb [arch=${a} signed-by=${k}] https://downloads.1password.com/linux/debian/${a} stable main`,
   },
   tailscale: {
     name: "tailscale",
+    fingerprints: ["2596A99EAAB33821893C0A79458CA832957F5868"],
     key: "https://pkgs.tailscale.com/stable/ubuntu/{codename}.noarmor.gpg",
     binaryKey: true,
     line: (k, c) => `deb [signed-by=${k}] https://pkgs.tailscale.com/stable/ubuntu ${c} main`,
   },
 };
 
+/** Shell expression: the primary-key fingerprints in a key file (armored or binary), sorted, space-separated. */
+const keyFingerprints = (path: string) =>
+  `$(h="$(mktemp -d)"; gpg --homedir "$h" --batch --with-colons --show-keys ${path} 2>/dev/null | awk -F: '$1=="pub"{p=1;next} $1=="fpr"&&p{print $10;p=0}' | sort -u | paste -sd ' ' -; rm -rf "$h")`;
+
 export function aptRepo(ctx: ModuleCtx, repo: AptRepo, owner: string): Resource[] {
   const keyring = `/etc/apt/keyrings/${repo.name}.gpg`;
   const keyUrl = repo.key.replace("{codename}", ctx.facts.codename);
-  const fetch = repo.binaryKey
-    ? `curl -fsSL ${q(keyUrl)} -o ${q(keyring)}`
-    : `curl -fsSL ${q(keyUrl)} | gpg --dearmor --yes -o ${q(keyring)}`;
+  const expected = [...repo.fingerprints].sort().join(" ");
+  // a key from the web counts only with the fingerprints fornax knows: TLS alone does not vouch for what is served
+  const fetch = `( d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
+curl -fsSL ${q(keyUrl)} -o "$d/key"
+got="${keyFingerprints('"$d/key"')}"
+[ "$got" = ${q(expected)} ] || { echo ${q(`apt key for ${repo.name}: expected ${expected}, got`)} "\${got:-no key}" >&2; exit 1; }
+${repo.binaryKey ? `install -m 0644 "$d/key" ${q(keyring)}` : `gpg --dearmor --yes -o "$d/key.gpg" "$d/key" && install -m 0644 "$d/key.gpg" ${q(keyring)}`} )`;
   return [
-    check(`apt-key:${repo.name}`, `apt key for ${repo.name}`, `[ -s ${q(keyring)} ]`, `install -d -m 0755 /etc/apt/keyrings; ${fetch}; chmod 0644 ${q(keyring)}`, { owner, handler: "apt" }),
+    check(`apt-key:${repo.name}`, `apt key for ${repo.name}`, `[ "${keyFingerprints(q(keyring))}" = ${q(expected)} ]`, `install -d -m 0755 /etc/apt/keyrings\n${fetch}`, { owner, handler: "apt" }),
     file(`/etc/apt/sources.list.d/${repo.name}.list`, `# ${HEADER}\n${repo.line(keyring, ctx.facts.codename, ctx.facts.arch === "arm64" ? "arm64" : "amd64")}\n`, { owner }),
   ];
 }

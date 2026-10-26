@@ -1,3 +1,5 @@
+import { posix } from "node:path";
+
 /** Quote a value for bash: always single quotes, embedded quotes escaped. */
 export const q = (s: string | number): string => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
@@ -16,6 +18,9 @@ export const asUser = (user: string, script: string, keep: string[] = []): strin
 
 /** Is `path` inside the home of `user` (and so controlled by that user)? */
 export const inHome = (user: string | undefined, path: string): boolean => !!user && user !== "root" && path.startsWith(`/home/${user}/`);
+
+/** The user whose home holds `path` (/home/<user>/…) — whoever else acts there could be led astray by that user's symlinks. */
+export const homeOf = (path: string): string | undefined => posix.normalize(path).match(/^\/home\/([^/]+)\/./)?.[1];
 
 export const sha256 =(s: string): string => new Bun.CryptoHasher("sha256").update(s).digest("hex");
 

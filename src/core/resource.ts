@@ -1,4 +1,5 @@
-import { asUser, emit, inHome, q, sha256 } from "./shell.ts";
+import { fail } from "./errors.ts";
+import { asUser, emit, homeOf, inHome, q, sha256 } from "./shell.ts";
 
 /**
  * Something on a server that should be in a certain state. Every resource knows how to
@@ -115,6 +116,15 @@ export function autoHandler(path: string): string {
 
 const normMode = (m: string) => parseInt(m, 8).toString(8);
 
+/** A path in a user's home is that user's to manage: root writing there would follow the user's symlinks. */
+function ownHome(path: string, user: string) {
+  const h = homeOf(path);
+  if (h && h !== "root" && h !== user) fail("config_invalid", `${path} is in the home of ${h}, so it must belong to ${h} (owner: ${h}:${h}), not ${user}`, `fornax writes in /home/${h} only as ${h}`);
+}
+
+/** Run `script` as the user whose home it acts in — as root once that user is gone (nobody is left to plant symlinks). */
+const asHomeUser = (user: string, script: string) => `if id -u ${q(user)} >/dev/null 2>&1; then ${asUser(user, script)}; else ( ${script} ); fi`;
+
 // ---- constructors ---------------------------------------------------------------
 
 export interface FileOpts {
@@ -130,6 +140,7 @@ export function file(path: string, content: string, o: FileOpts): Resource {
   const mode = o.mode ?? "0644";
   const user = o.user ?? "root:root";
   const [u, g] = user.split(":");
+  ownHome(path, u!);
   return {
     id: `file:${path}`,
     kind: "file",
@@ -149,21 +160,31 @@ export function file(path: string, content: string, o: FileOpts): Resource {
 }
 
 export function absent(path: string, o: { owner: string; handler?: string; recursive?: boolean; destructive?: boolean; summary?: string }): Resource {
+  const probe = `if [ -e ${q(path)} ] || [ -L ${q(path)} ]; then echo present; else echo absent; fi`;
+  const rm = `rm -${o.recursive ? "rf" : "f"} ${q(path)}`;
+  const h = homeOf(path);
+  // in a home, looked at and removed by its user: as root, rm follows a directory the user swapped for a
+  // symlink. The backup is the user's tar of it — never put back as root, so not in the restore list
+  const home = h && h !== "root";
+  const tar = `[ -e ${q(path)} ] || [ -L ${q(path)} ] || exit 0; cd -- "$(dirname ${q(path)})" && tar -cf - -- "$(basename ${q(path)})"`;
   return {
     id: `absent:${path}`,
     kind: "absent",
     path,
     summary: o.summary ?? `remove ${path}`,
     owner: o.owner,
-    probe: `if [ -e ${q(path)} ] || [ -L ${q(path)} ]; then echo present; else echo absent; fi`,
+    probe: home ? asHomeUser(h, probe) : probe,
     desired: "absent",
-    apply: `fornax_backup ${q(o.handler ?? autoHandler(path))} ${q(path)}; rm -${o.recursive ? "rf" : "f"} ${q(path)}`,
+    apply: home
+      ? `b="$BK/$(printf '%s' ${q(path)} | tr '/' '_').tar"; ( umask 077; ${asHomeUser(h, tar)} > "$b" ); [ -s "$b" ] || rm -f "$b"; ${asHomeUser(h, rm)}`
+      : `fornax_nohome ${q(path)}; fornax_backup ${q(o.handler ?? autoHandler(path))} ${q(path)}; ${rm}`,
     handler: o.handler ?? autoHandler(path),
     destructive: o.destructive,
   };
 }
 
 export function symlink(path: string, target: string, o: { owner: string; handler?: string; user?: string }): Resource {
+  ownHome(path, "root");
   const chown = o.user ? `; chown -h ${q(o.user)} ${q(path)}` : "";
   return {
     id: `symlink:${path}`,
@@ -173,7 +194,7 @@ export function symlink(path: string, target: string, o: { owner: string; handle
     owner: o.owner,
     probe: `if [ -L ${q(path)} ]; then readlink ${q(path)}; elif [ -e ${q(path)} ]; then echo not-a-link; else echo missing; fi`,
     desired: target,
-    apply: `fornax_backup ${q(o.handler ?? autoHandler(path))} ${q(path)}; mkdir -p "$(dirname ${q(path)})"; ln -sfn ${q(target)} ${q(path)}${chown}`,
+    apply: `fornax_nohome ${q(path)}; fornax_backup ${q(o.handler ?? autoHandler(path))} ${q(path)}; mkdir -p "$(dirname ${q(path)})"; ln -sfn ${q(target)} ${q(path)}${chown}`,
     handler: o.handler ?? autoHandler(path),
   };
 }
@@ -182,6 +203,7 @@ export function dir(path: string, o: { owner: string; mode?: string; user?: stri
   const mode = o.mode ?? "0755";
   const user = o.user ?? "root:root";
   const [u, g] = user.split(":");
+  ownHome(path, u!);
   return {
     id: `dir:${path}`,
     kind: "dir",
@@ -253,6 +275,12 @@ BK="/var/lib/fornax/backup/$FORNAX_RUN"; mkdir -p "$BK"
 PENDING="$(cat /var/lib/fornax/pending 2>/dev/null || true)"
 trap 'printf "%s" "$PENDING" > /var/lib/fornax/pending' EXIT
 fornax_pending() { case " $PENDING " in *" $1 "*) ;; *) PENDING="$PENDING $1";; esac; }
+# Root acts on no path that leads into a home, whatever the config says: a symlink there (or on the way)
+# is the user's to set. Paths in a home are handled as their user (absent, file, dir).
+fornax_nohome() { # path
+  local d; d="$(readlink -m -- "$(dirname -- "$1")")"
+  case "$d/" in /home/?*/*) echo "refusing to change $1 as root: it leads into $d" >&2; return 1;; esac
+}
 fornax_backup() { # handler path
   local h="$1" p="$2" b
   b="$BK/$(printf '%s' "$p" | tr '/' '_')"
@@ -265,6 +293,7 @@ fornax_restore() { # handler
 }
 fornax_write() { # path mode user group handler  (content on stdin)
   local p="$1" m="$2" u="$3" g="$4" h="$5" t
+  fornax_nohome "$p"
   mkdir -p "$(dirname "$p")"
   fornax_backup "$h" "$p"
   t="$(mktemp "$p.fornax.XXXXXX")"

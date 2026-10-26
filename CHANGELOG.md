@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Security: root no longer acts on a site user's paths.** `absent` (a site's `files` when it is removed, `retire`) looks and deletes as the user whose home holds the path — before, a user could swap a directory on the way for a symlink and have root delete a file elsewhere. A configured file in a home must belong to that home's user (`config_invalid` otherwise), and root refuses to write or delete any path that leads into a home through a symlink.
+- **Security: the Composer installer is checked and run in a directory of root's own**, not as `/tmp/composer-setup.php`, which a site user could swap between the checksum and the run.
+- **Security: Bun is installed from its signed checksums** (Bun's release key is built in) instead of `curl https://bun.sh/install | bash`; the same latest release, for x64, x64 without AVX2 and arm64.
+- **Security: APT repository keys must have the fingerprints fornax knows** (nginx, ondrej/php, NodeSource, Redis, CrowdSec, 1Password, Tailscale). A keyring already on a server is checked on every plan and fetched again if it differs.
+- **Security: the webhook deploys only the head of the branch.** A replayed push (or one overtaken by a newer push) deploys the current head instead of the older commit it names. Requests without a well-formed signature are refused before their body is read, bodies are cut off past 25 MB, and at most four are read at once.
+
 ## 1.1.4 — 2026-10-25
 
 - **A forwarded root key is offered even when `~/.ssh/config` sets `IdentitiesOnly yes`** for the server: fornax names it as a public key file, ahead of the local key handle. Tested from a phone (Termius, a Face ID key in the secure enclave) through a box at home.

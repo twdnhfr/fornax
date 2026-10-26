@@ -6,6 +6,7 @@ import { absent, file, packages } from "../../src/core/resource.ts";
 import { assertOrder, desired } from "../../src/modules/index.ts";
 import { cronConf, daemonConf, poolConf, vhostConf } from "../../src/modules/site.ts";
 import { ufwRules } from "../../src/modules/server.ts";
+import { aptRepo, REPOS } from "../../src/modules/common.ts";
 
 const fleet = loadFleet({ cwd: join(import.meta.dir, "..", "..", "examples", "fleet") });
 const server = fleet.servers.get("web-1")!;
@@ -104,6 +105,30 @@ describe("plan engine", () => {
       expect(p.stderr.toString()).toBe("");
       expect(p.exitCode).toBe(0);
     }
+  });
+});
+
+describe("paths in a home", () => {
+  test("are removed by their user, not root (root's rm follows a directory the user swapped for a link)", () => {
+    const r = absent("/home/shop/conf/old.ini", { owner: "t" });
+    expect(r.apply).toContain("--reuid='shop'");
+    expect(r.probe).toContain("--reuid='shop'");
+    expect(r.apply).not.toContain("fornax_backup");
+    expect(absent("/etc/old", { owner: "t" }).apply).toStartWith("fornax_nohome '/etc/old';");
+  });
+  test("belong to their user: root's files there are refused", () => {
+    expect(() => file("/home/shop/x.conf", "x", { owner: "t" })).toThrow("must belong to shop");
+    expect(() => file("/home/shop/../docs/x.conf", "x", { owner: "t", user: "shop:shop" })).toThrow("home of docs");
+    expect(file("/home/shop/x.conf", "x", { owner: "t", user: "shop:shop" }).apply).toContain("--reuid='shop'");
+  });
+});
+
+describe("apt keys", () => {
+  test("a key is taken only with the fingerprints fornax knows", () => {
+    const [key] = aptRepo(ctx, REPOS.nginx!, "t");
+    expect(key!.probe).toContain("'573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 8540A6F18833A80E9C1653A42FD21310B49F6B46 9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3'");
+    expect(key!.apply).toContain("apt key for nginx: expected");
+    for (const repo of Object.values(REPOS)) expect(repo.fingerprints.every((f) => /^[0-9A-F]{40}$/.test(f))).toBe(true);
   });
 });
 

@@ -406,7 +406,7 @@ defineCommand({
     const env = `${site.root}/.env`;
     const refresh = site.spec.preset === "laravel" ? `[ -f ${q(site.current)}/artisan ] && runuser -u ${site.user} -- bash -c ${q(`cd ${site.current} && php${site.php} artisan optimize >/dev/null`)} || true; systemctl reload php${site.php}-fpm || true` : "true";
     const write = `set -e; umask 027
-[ ! -f ${q(env)} ] || cp -p ${q(env)} ${q(env)}.fornax-$(date +%Y%m%d%H%M%S)
+[ ! -f ${q(env)} ] || { b=${q(env)}.fornax-$(date +%Y%m%d%H%M%S); cp -p ${q(env)} "$b"; chmod 0600 "$b"; }
 printf %s ${q(b64(local))} | base64 -d > ${q(env)}.fornax-new
 chmod 0640 ${q(env)}.fornax-new; mv -f ${q(env)}.fornax-new ${q(env)}`;
     await runnerFor(fleet, server).run(`set -e

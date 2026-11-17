@@ -403,6 +403,27 @@ SQL
   return r;
 }
 
+/**
+ * .env and every copy of it next to it (.env.bak-*, .env.fornax-* from `fornax env push`) must not be
+ * readable by other users: a site's secrets (APP_KEY, database password, API keys) stay with its user.
+ * envBootstrap writes 0640, but an .env that came from Forge or a hand-made copy keeps whatever mode it
+ * had (on red-star five .env files were 664 after the takeover, unnoticed by plan). Only the mode is
+ * touched, never the content; as the site user, like everything in a home.
+ */
+export function envPermissions(user: string, root: string, domain: string, o: { owner: string }): Resource {
+  const loose = `find ${q(root)} -maxdepth 1 -type f -name '.env*' -perm /g=w,o=rwx`;
+  return homeCheck(
+    user,
+    root,
+    `env-mode:${domain}`,
+    `${root}/.env and its copies readable only by ${user} (0640 or tighter)`,
+    `[ -z "$(${loose} 2>/dev/null | head -1)" ]`,
+    asUser(user, `${loose} -exec chmod g-w,o-rwx {} +`),
+    "ok",
+    o,
+  );
+}
+
 function envBootstrap(ctx: ModuleCtx, s: ResolvedSite, o: { owner: string }): Resource {
   const scheme = certPaths(s) ? "https" : "http";
   const redis = s.redis !== "none";
@@ -580,6 +601,7 @@ if [ "$(id -u ${q(u)})" -lt 1000 ]; then echo "${u} is a system account — refu
   if (!adopted && s.db?.manage) r.push(...dbResources(ctx, s, o));
   r.push(...redisResources(s, o));
   if (!adopted && s.spec.preset === "laravel") r.push(envBootstrap(ctx, s, o));
+  r.push(envPermissions(s.user, s.root, s.domain, o));
   const auth = ctx.facts.composerAuth?.[s.domain];
   if (auth) {
     // linked into every release by `fornax release`, like .env

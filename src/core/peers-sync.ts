@@ -4,7 +4,7 @@
  * commit's signature (peers.ts) — and push it to the peers that are behind. Two peers that went
  * different ways stop it (fleet_diverged): fornax never merges.
  */
-import { fail } from "./errors.ts";
+import { FornaxError, fail } from "./errors.ts";
 import type { Fleet } from "./fleet.ts";
 import { assertVerified, git, isAncestor, needTrust, writeTrust, type CommitCheck } from "./peers.ts";
 import { q } from "./shell.ts";
@@ -55,6 +55,17 @@ export async function pushPeer(fleet: Fleet, server: Server, commit: string): Pr
   const { url, env } = await remote(fleet, server);
   const p = Bun.spawnSync(["git", "-C", fleet.dir, "push", "--quiet", url, `${commit}:refs/heads/main`], { env, stdout: "pipe", stderr: "pipe" });
   if (p.exitCode !== 0) fail("peer_push_failed", `pushing the fleet repo to ${server.server} failed`, p.stderr.toString().trim().split("\n").slice(-3).join(" "));
+}
+
+/**
+ * Why a push to a peer failed, as shown next to it. The hint carries git's own words (a rejected hook,
+ * "Working directory has unstaged changes"): without them the failure is a dead end — on red-star a hand
+ * edit in the peer's work tree stopped every push for eleven days, reported only as "push failed".
+ */
+export function pushFailure(e: unknown): string {
+  const message = (e as Error)?.message ?? String(e);
+  const hint = e instanceof FornaxError ? e.hint : undefined;
+  return hint ? `${message}: ${hint}` : message;
 }
 
 export interface SyncResult {
@@ -157,7 +168,7 @@ export async function syncPeers(fleet: Fleet, o: { push: boolean; acceptReview?:
         p.state = "same";
       } catch (e) {
         p.pushed = false;
-        p.reason = (e as Error).message;
+        p.reason = pushFailure(e);
       }
     }
   }

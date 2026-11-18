@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FornaxError } from "../../src/core/errors.ts";
 import { assertVerified, splitSignature, verifyRange } from "../../src/core/peers.ts";
+import { pushFailure } from "../../src/core/peers-sync.ts";
 
 // git must not read the developer's own config (signing program, hooks, identity)
 process.env.GIT_CONFIG_GLOBAL = "/dev/null";
@@ -181,5 +182,19 @@ describe("the fleet repo on a server", () => {
     const script = peerRepoScript("web-1");
     expect(script).not.toMatch(/install -d -m 0700[^\n]*\/var\/lib\/fornax(\s|$)/m);
     expect(script).toContain('install -d -m 0700 -o root -g root "$d"');
+  });
+});
+
+// on red-star a hand edit in the peer's work tree made git refuse every push for eleven days,
+// and apply only said "pushing the fleet repo to red-star failed": git's own words were dropped
+describe("pushFailure", () => {
+  test("keeps git's words from the hint", () => {
+    const e = new FornaxError("peer_push_failed", "pushing the fleet repo to red-star failed", "! [remote rejected] abc -> main (Working directory has unstaged changes)");
+    expect(pushFailure(e)).toBe("pushing the fleet repo to red-star failed: ! [remote rejected] abc -> main (Working directory has unstaged changes)");
+  });
+
+  test("is just the message without a hint, or for any other error", () => {
+    expect(pushFailure(new FornaxError("peer_push_failed", "pushing failed"))).toBe("pushing failed");
+    expect(pushFailure(new Error("boom"))).toBe("boom");
   });
 });

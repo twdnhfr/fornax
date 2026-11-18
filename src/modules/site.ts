@@ -407,18 +407,30 @@ SQL
  * .env and every copy of it next to it (.env.bak-*, .env.fornax-* from `fornax env push`) must not be
  * readable by other users: a site's secrets (APP_KEY, database password, API keys) stay with its user.
  * envBootstrap writes 0640, but an .env that came from Forge or a hand-made copy keeps whatever mode it
- * had (on red-star five .env files were 664 after the takeover, unnoticed by plan). Only the mode is
- * touched, never the content; as the site user, like everything in a home.
+ * had (on red-star five .env files were 664 after the takeover, unnoticed by plan). The content is never
+ * touched; as the site user, like everything in a home (root acts on no path there).
+ * A copy the site user does not own (alpaluft.de had a 644 root:root .env.bak from a hand-made backup)
+ * cannot be chmod-ed by it: it is replaced by the user's own copy, same content, the tightened mode —
+ * the directory is the user's, so is the rename. One it cannot even read is no leak to the user, but
+ * it stays open to others: the apply stops and names it, for root to fix by hand.
  */
 export function envPermissions(user: string, root: string, domain: string, o: { owner: string }): Resource {
   const loose = `find ${q(root)} -maxdepth 1 -type f -name '.env*' -perm /g=w,o=rwx`;
+  const fix = `set -o pipefail
+${loose} -print0 | while IFS= read -r -d '' f; do
+  if [ -O "$f" ]; then chmod g-w,o-rwx -- "$f"
+  elif [ -r "$f" ]; then
+    t="$(mktemp -- "$f.XXXXXX")" && cat -- "$f" > "$t" && chmod --reference="$f" -- "$t" && chmod g-w,o-rwx -- "$t" && mv -f -T -- "$t" "$f" || { rm -f -- "$t"; exit 1; }
+  else echo "$f belongs to $(stat -c %U -- "$f") and $(id -un) cannot read it: tighten its mode as root by hand" >&2; exit 1
+  fi
+done`;
   return homeCheck(
     user,
     root,
     `env-mode:${domain}`,
     `${root}/.env and its copies readable only by ${user} (0640 or tighter)`,
     `[ -z "$(${loose} 2>/dev/null | head -1)" ]`,
-    asUser(user, `${loose} -exec chmod g-w,o-rwx {} +`),
+    asUser(user, fix),
     "ok",
     o,
   );

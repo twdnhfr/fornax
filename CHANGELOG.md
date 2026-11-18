@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 — unreleased
 
 - **Security: root no longer acts on a site user's paths.** `absent` (a site's `files` when it is removed, `retire`) looks and deletes as the user whose home holds the path — before, a user could swap a directory on the way for a symlink and have root delete a file elsewhere. A configured file in a home must belong to that home's user and group (`config_invalid` otherwise — the user cannot hand a file to another group, so such an owner never converged), and root refuses to write or delete any path that leads into a home through a symlink.
 - **Security: a home whose user is gone is never looked into as root.** The first version of the change above fell back to root for a site user that no longer exists — and followed the links that user had left in its home (`/home/shop/config → /etc/cron.d`). Now the plan stops with `home_without_user` (remove the home or create the user again), files in a home are also probed and diffed as their user, and a site purge removes such a home as a whole. The same holds for the `.env`, `auth.json` and deploy-log checks, and for the removal of files left from fornax's old name (a home owned by root, or by a uid no account has, is not entered at all).

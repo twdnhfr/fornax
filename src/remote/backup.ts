@@ -266,42 +266,79 @@ function copyRange(from: string, to: string, start: number, length: number) {
   }
 }
 
-/** A site path as it is named in the site user's tar (save: `tar -C /`), relative to where unpackScript puts it. */
-export function unpackedPath(site: { root: string }, path: string): string {
-  const p = posix.normalize(path).replace(/^\/+|\/+$/g, "");
-  const root = posix.normalize(site.root).replace(/^\/+|\/+$/g, "");
-  return p === root ? "" : p.startsWith(`${root}/`) ? p.slice(root.length + 1) : p;
-}
+/** Where a path from outside the site root lands in an unpacked tree: under its full path below this. */
+export const OUTSIDE = "outside";
+
+const bare = (p: string) => posix.normalize(p).replace(/^\/+|\/+$/g, "");
 
 /**
- * The site user's part of a packed snapshot, unpacked BY THAT USER into a new directory `into`: a member
- * under the site root lands relative to it (storage/…, .env), one from outside under its full path
- * (var/data/…). Root only cuts its own member off the front of the stream; it never writes into the home
- * — the archive is what the user packed, and the user unpacks it with nothing but its own rights.
+ * A site path as unpackScript puts it: relative to the site root (storage, .env), or — from outside the
+ * root — under outside/ with its full path (outside/var/data/…), so the two can never land on each other.
  */
-export function unpackScript(site: { user: string; root: string }, file: string, offset: number, into: string): string {
-  const root = posix.normalize(site.root).replace(/^\/+|\/+$/g, "");
-  // a sed expression for --transform: the root's members lose that prefix (',' is the delimiter)
-  const strip = `s,^${root.replace(/[\\.*[\]^$,]/g, "\\$&")}/,,`;
-  const user = `umask 077; mkdir -- ${q(into)} && tar -x -p -f - -C ${q(into)} --no-same-owner --transform ${q(strip)}`;
-  return `set -o pipefail; tail -c +${offset + 1} -- ${q(file)} | ${asUser(site.user, user)}`;
+export function unpackedPath(site: { root: string }, path: string): string {
+  const p = bare(path);
+  const root = bare(site.root);
+  return p === root ? "" : p.startsWith(`${root}/`) ? p.slice(root.length + 1) : `${OUTSIDE}/${p}`;
 }
 
+/** A path under the site root named outside/… would mix with the paths from outside it: such a site is refused. */
+export function outsideClash(site: { root: string; paths: string[] }): string | undefined {
+  const root = bare(site.root);
+  return site.paths.find((p) => {
+    const b = bare(p);
+    return b.startsWith(`${root}/`) && (b.slice(root.length + 1) === OUTSIDE || b.slice(root.length + 1).startsWith(`${OUTSIDE}/`));
+  });
+}
+
+/** The site user's part of a packed snapshot: everything after root's own member. */
+export const packedSource = (file: string, offset: number) => `tail -c +${offset + 1} -- ${q(file)}`;
+
 /**
- * --replace for a packed snapshot: every site path that is in the unpacked tree goes over the live one,
- * as the site user (rsync --delete for a directory), then the unpacked tree is removed. A path the
- * snapshot does not hold is left as it is.
+ * The paths of a snapshot from before the packing (restic restored them into root's own `tmp`), as one
+ * tar like the one the user makes: links stay links, nothing is followed.
+ */
+export const restoredSource = (tmp: string, paths: string[]) =>
+  `( cd -- ${q(tmp)} && for p in ${paths.map((p) => q(bare(p))).join(" ")}; do if [ -e "$p" ] || [ -L "$p" ]; then set -- "$@" "$p"; fi; done; exec tar -cf - -T /dev/null -- "$@" )`;
+
+/**
+ * A tar of the site's paths (named from /, as `save` packs them; `source` is the shell that prints it),
+ * unpacked BY THE SITE USER into a new directory `into` — laid out as unpackedPath says. Root never
+ * writes into the home: the user unpacks with nothing but its own rights. Link targets are kept as they
+ * are (S): only names and hard links move.
+ */
+export function unpackScript(site: { user: string; root: string }, source: string, into: string): string {
+  const root = bare(site.root).replace(/[\\.*[\]^$,]/g, "\\$&");
+  // every member under outside/ first, then the root's own out of it again (',' is the delimiter)
+  const transforms = [`s,^,${OUTSIDE}/,S`, `s,^${OUTSIDE}/${root}/,,S`, `s,^${OUTSIDE}/${root}$,.,S`];
+  const user = `umask 077; mkdir -- ${q(into)} && tar -x -p -f - -C ${q(into)} --no-same-owner ${transforms.map((t) => `--transform ${q(t)}`).join(" ")}`;
+  return `set -o pipefail; ${source} | ${asUser(site.user, user)}`;
+}
+
+/** What replaceScript prints after each path it has put back. */
+export const REPLACED = "@@replaced";
+
+/**
+ * --replace: every site path that is in the unpacked tree goes over the live one, as the site user
+ * (rsync --delete for a directory), then the unpacked tree is removed. A path the snapshot does not hold
+ * is left as it is. Before anything is replaced, every path to replace must be writable — so a path the
+ * user may not write stops the restore before it starts, not halfway; what is put back is printed.
  */
 export function replaceScript(site: { user: string; root: string; paths: string[] }, unpacked: string): string {
-  const moves = site.paths.map((p) => {
-    const from = posix.join(unpacked, unpackedPath(site, p));
-    // --ignore-times: a live file changed within the second of the snapshot's and of the same size is
-    // still the wrong one — rsync's quick check would keep it
-    return `if [ -L ${q(from)} ] || [ -f ${q(from)} ]; then rsync -a --ignore-times -- ${q(from)} ${q(p)}
-elif [ -d ${q(from)} ]; then rsync -a --ignore-times --delete -- ${q(from + "/")} ${q(p)}
-fi`;
-  });
-  return asUser(site.user, ["set -e", ...moves, `rm -rf -- ${q(unpacked)}`].join("\n"));
+  const pairs = site.paths.map((p) => ({ p, from: posix.join(unpacked, unpackedPath(site, p)) }));
+  const held = (from: string) => `{ [ -L ${q(from)} ] || [ -e ${q(from)} ]; }`;
+  const checks = pairs.map(
+    ({ p, from }) =>
+      // into an existing directory rsync writes inside it; a file (or a path not there yet) is put in place in its parent
+      `if ${held(from)}; then if [ -d ${q(p)} ] && [ ! -L ${q(p)} ]; then w=${q(p)}; else w="$(dirname -- ${q(p)})"; fi; [ -w "$w" ] || { echo ${q(`cannot write ${p}`)} as "$(id -un)" >&2; exit 1; }; fi`,
+  );
+  // --ignore-times: a live file changed within the second of the snapshot's and of the same size is
+  // still the wrong one — rsync's quick check would keep it
+  const moves = pairs.map(
+    ({ p, from }) => `if [ -L ${q(from)} ] || [ -f ${q(from)} ]; then rsync -a --ignore-times -- ${q(from)} ${q(p)}; echo ${q(`${REPLACED} ${p}`)}
+elif [ -d ${q(from)} ]; then rsync -a --ignore-times --delete -- ${q(from + "/")} ${q(p)}; echo ${q(`${REPLACED} ${p}`)}
+fi`,
+  );
+  return asUser(site.user, ["set -e", ...checks, ...moves, `rm -rf -- ${q(unpacked)}`].join("\n"));
 }
 
 export interface RestoreResult {
@@ -323,9 +360,13 @@ export function restore(domain: string, snapshot: string, what: { db: boolean; f
   const snaps = listSnapshots(domain);
   const snap = snapshot === "latest" ? snaps[snaps.length - 1] : snaps.find((s) => s.id.startsWith(snapshot));
   if (!snap) throw new FornaxError("backup_error", `no snapshot ${snapshot} for ${domain} (have: ${snaps.map((s) => s.id).join(", ") || "none"})`);
-  // a packed snapshot (see save): its files are the site user's tar, which only that user unpacks
+  // a packed snapshot (see save): its files are the site user's tar; any snapshot's files are unpacked by that user only
   const packed = snap.paths.length === 1 && snap.paths[0] === `/${packedName(domain)}`;
-  if (packed && what.files) requireSiteUser(site);
+  if (what.files) {
+    requireSiteUser(site);
+    const clash = outsideClash(site);
+    if (clash) throw new FornaxError("backup_error", `${clash} is named ${OUTSIDE}/… under the site root, where the paths from outside the root are restored`, "rename that path in the site's config, or restore with --only db");
+  }
   // to the second, and counted on if a restore of this site in the same second left its directory
   const base = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
   let stamp = base;
@@ -407,35 +448,26 @@ export function restore(domain: string, snapshot: string, what: { db: boolean; f
     result.db = { restored_into: target, replaced: replace };
   }
 
-  if (own && what.files) {
-    // side by side: the user's own new restore-<stamp>/; --replace: unpacked next to the live data, then moved over it
+  if (what.files) {
+    // side by side: the user's own new restore-<stamp>/; --replace: unpacked next to the live data, then moved over it.
+    // A snapshot from before the packing holds the paths as restic read them as root: root tars them out
+    // of its own tmp directory, and the site user unpacks that like its own tar.
     const dest = join(site.root, replace ? `.restore-${stamp}` : `restore-${stamp}`);
-    const u = sh(["bash", "-c", unpackScript(site, file, own.next, dest)]);
+    const source = own ? packedSource(file, own.next) : restoredSource(tmp, site.paths);
+    const u = sh(["bash", "-c", unpackScript(site, source, dest)]);
     if (u.code !== 0) throw new FornaxError("backup_error", `unpacking the files as ${site.user}: ${u.err.trim().split("\n").slice(-3).join(" | ")}`);
     if (replace) {
       const m = sh(["bash", "-c", replaceScript(site, dest)]);
-      if (m.code !== 0) throw new FornaxError("backup_error", `putting the files back as ${site.user}: ${m.err.trim().split("\n").slice(-3).join(" | ")}`, `the unpacked files are still in ${dest}`);
-      result.files = { restored_to: site.root, replaced: true };
-    } else result.files = { restored_to: dest, replaced: false };
-  } else if (what.files) {
-    // a snapshot from before the packing (restic read the paths as root): as before
-    const restoredPaths = site.paths.filter((p) => existsSync(join(tmp, p)));
-    if (replace) {
-      for (const p of restoredPaths) {
-        const from = join(tmp, p);
-        const isDir = sh(["test", "-d", from]).code === 0;
-        const s = sh(["rsync", "-a", "--delete", isDir ? `${from}/` : from, p]);
-        if (s.code !== 0) throw new FornaxError("backup_error", `rsync ${p}: ${s.err.trim()}`);
-        sh(["chown", "-R", `${site.user}:${site.user}`, p]);
+      if (m.code !== 0) {
+        const done = m.out.split("\n").filter((l) => l.startsWith(`${REPLACED} `)).map((l) => l.slice(REPLACED.length + 1));
+        throw new FornaxError(
+          "backup_error",
+          `putting the files back as ${site.user}: ${m.err.trim().split("\n").slice(-3).join(" | ")}`,
+          `${done.length ? `already replaced: ${done.join(", ")} — the other paths are as they were` : "nothing was replaced"}; the unpacked files are in ${dest}`,
+        );
       }
       result.files = { restored_to: site.root, replaced: true };
-    } else {
-      const dest = join(site.root, `restore-${stamp}`);
-      mkdirSync(dest, { recursive: true });
-      for (const p of restoredPaths) renameSync(join(tmp, p), join(dest, p.slice(site.root.length + 1) || p.split("/").pop()!));
-      sh(["chown", "-R", `${site.user}:${site.user}`, dest]);
-      result.files = { restored_to: dest, replaced: false };
-    }
+    } else result.files = { restored_to: dest, replaced: false };
   }
   rmSync(tmp, { recursive: true, force: true });
   return result;

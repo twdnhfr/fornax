@@ -13,6 +13,7 @@
  */
 import { SITE_LOG_ROOT } from "../core/runtime.ts";
 import { check, type Resource } from "../core/resource.ts";
+import { asEachHomeOwner } from "../core/shell.ts";
 import type { ModuleCtx } from "./common.ts";
 
 /** Everything the old name left on a server (also what `preflight` looks for). */
@@ -73,6 +74,8 @@ copy /root/.ssh/anvil-storagebox.pub /root/.ssh/fornax-storagebox.pub
 # inside a home as its user (root would follow links planted there); the deploy history goes to
 # the root-owned log directory, regular files only
 for h in /home/*; do
+  # only a real home of a real account: not a link, not root's, not a uid no account has (stat says UNKNOWN)
+  [ -d "$h" ] && [ ! -L "$h" ] && [ "$(stat -c %u "$h")" -ne 0 ] && getent passwd "$(stat -c %u "$h")" >/dev/null || continue
   u=$(stat -c %U "$h"); g=$(stat -c %G "$h")
   asu() { setpriv --reuid="$u" --regid="$g" --init-groups -- "$@"; }
   if [ -d "$h/.anvil" ]; then
@@ -101,11 +104,8 @@ id -u anvil-hook >/dev/null 2>&1 && ! id -u fornax-hook >/dev/null 2>&1 && { use
 true`;
 
 const LATE = `rm -rf ${LEGACY_GLOBS.filter((g) => !g.startsWith("/etc/redis") && !g.startsWith("/home/")).join(" ")}
-# in a home as its user, as in EARLY
-for h in /home/*; do
-  [ -d "$h" ] && [ ! -L "$h" ] || continue
-  setpriv --reuid="$(stat -c %U "$h")" --regid="$(stat -c %G "$h")" --init-groups -- rm -rf "$h/.anvil" "$h/.ssh/anvil-deploy" "$h/.ssh/anvil-deploy.pub" || true
-done
+# in a home as its owner, as in EARLY (a home owned by root or by no account is not entered)
+${asEachHomeOwner('rm -rf -- "$1/.anvil" "$1/.ssh/anvil-deploy" "$1/.ssh/anvil-deploy.pub" || true')}
 if [ -e /etc/redis/anvil.conf ]; then sed -i '\\#^include /etc/redis/anvil.conf$#d' /etc/redis/redis.conf; rm -f /etc/redis/anvil.conf /etc/redis/anvil-auth.conf; fi
 id -u anvil-hook >/dev/null 2>&1 && userdel anvil-hook
 # the services that read the removed files reload — each config checked first

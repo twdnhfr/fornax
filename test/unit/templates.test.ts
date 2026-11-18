@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { loadFleet, resolveSite, sites } from "../../src/core/fleet.ts";
 import { applyScript, computeChanges, parseProbe, probeScript } from "../../src/core/plan.ts";
-import { absent, file, packages, REFUSED } from "../../src/core/resource.ts";
+import { absent, dir, file, packages, REFUSED } from "../../src/core/resource.ts";
+import { legacyEarly, legacyLate } from "../../src/modules/legacy.ts";
 import { assertOrder, desired } from "../../src/modules/index.ts";
 import { cronConf, daemonConf, poolConf, vhostConf } from "../../src/modules/site.ts";
 import { ufwRules } from "../../src/modules/server.ts";
@@ -120,6 +121,25 @@ describe("paths in a home", () => {
     expect(() => file("/home/shop/x.conf", "x", { owner: "t" })).toThrow("must belong to shop");
     expect(() => file("/home/shop/../docs/x.conf", "x", { owner: "t", user: "shop:shop" })).toThrow("home of docs");
     expect(file("/home/shop/x.conf", "x", { owner: "t", user: "shop:shop" }).apply).toContain("--reuid='shop'");
+  });
+  // the user writes the file with its own group and cannot hand it to another: every plan showed it again
+  test("belong to their user's own group too: another group would never be reached", () => {
+    expect(() => file("/home/shop/x.conf", "x", { owner: "t", user: "shop:www-data" })).toThrow("not shop:www-data");
+    expect(() => dir("/home/shop/public", { owner: "t", user: "shop:www-data" })).toThrow("not shop:www-data");
+    expect(file("/home/shop/x.conf", "x", { owner: "t", user: "shop" }).desired).toEndWith(" shop:shop");
+  });
+});
+
+describe("the cleanup of the old name (anvil) in the homes", () => {
+  const legacyCtx = { ...ctx, facts: { ...ctx.facts, legacy: true } };
+  // a home owned by root (or by a uid no account has) was entered as root: rm -rf followed its links
+  test("enters only a real home of a real account, never as root", () => {
+    const late = legacyLate(legacyCtx)[0]!.apply;
+    expect(late).not.toContain('--reuid="$(stat -c %U');
+    expect(late).toContain('[ "$uid" -ne 0 ] || continue');
+    expect(late).toContain('getent passwd "$uid"');
+    const early = legacyEarly(legacyCtx)[0]!.apply;
+    expect(early).toContain('[ ! -L "$h" ] && [ "$(stat -c %u "$h")" -ne 0 ] && getent passwd');
   });
 });
 

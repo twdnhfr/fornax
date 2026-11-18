@@ -116,10 +116,14 @@ export function autoHandler(path: string): string {
 
 const normMode = (m: string) => parseInt(m, 8).toString(8);
 
-/** A path in a user's home is that user's to manage: root writing there would follow the user's symlinks. */
-function ownHome(path: string, user: string) {
+/**
+ * A path in a user's home is that user's to manage: root writing there would follow the user's symlinks.
+ * The user writes it with its own group too — it cannot hand a file to another group (www-data), so such
+ * an owner would never be reached and every plan would show it again.
+ */
+function ownHome(path: string, user: string, group = user) {
   const h = homeOf(path);
-  if (h && h !== "root" && h !== user) fail("config_invalid", `${path} is in the home of ${h}, so it must belong to ${h} (owner: ${h}:${h}), not ${user}`, `fornax writes in /home/${h} only as ${h}`);
+  if (h && h !== "root" && (h !== user || group !== user)) fail("config_invalid", `${path} is in the home of ${h}, so it must belong to ${h} (owner: ${h}:${h}), not ${user}:${group}`, `fornax writes in /home/${h} only as ${h}, with its own group`);
 }
 
 /** A probe prints this when it will not look at a path: the plan stops there (parseProbe in core/plan.ts). */
@@ -159,7 +163,7 @@ export function file(path: string, content: string, o: FileOpts): Resource {
   const mode = o.mode ?? "0644";
   const user = o.user ?? "root:root";
   const [u, g] = user.split(":");
-  ownHome(path, u!);
+  ownHome(path, u!, g ?? u!);
   const h = homeUser(path);
   const probe = `if [ -f ${q(path)} ] && [ ! -L ${q(path)} ]; then echo "$(sha256sum < ${q(path)} | cut -c1-64) $(stat -c '%a %U:%G' ${q(path)})"; else echo missing; fi`;
   return {
@@ -223,7 +227,7 @@ export function dir(path: string, o: { owner: string; mode?: string; user?: stri
   const mode = o.mode ?? "0755";
   const user = o.user ?? "root:root";
   const [u, g] = user.split(":");
-  ownHome(path, u!);
+  ownHome(path, u!, g ?? u!);
   const h = homeUser(path);
   const probe = `if [ -d ${q(path)} ]; then stat -c '%a %U:%G' ${q(path)}; else echo missing; fi`;
   return {

@@ -30,3 +30,19 @@ export const indent = (s: string, n = 2) =>
     .split("\n")
     .map((l) => (l ? " ".repeat(n) + l : l))
     .join("\n");
+
+/**
+ * Shell: `body` once per home in /home, run as the owner of that home with the home as $1 — root only looks
+ * at /home/<name> itself. A home owned by root, or by a uid without an account, is not entered (`orphan`
+ * runs with $h instead): links left there could lead anywhere.
+ */
+export function asEachHomeOwner(body: string, orphan = ":"): string {
+  return `for h in /home/*; do
+  [ -d "$h" ] && [ ! -L "$h" ] || continue
+  uid=$(stat -c %u -- "$h") && gid=$(stat -c %g -- "$h") || continue
+  [ "$uid" -ne 0 ] || continue
+  u=$(getent passwd "$uid" | cut -d: -f1) || u=""
+  if [ -z "$u" ]; then ${orphan}; continue; fi
+  ( cd / && env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME="$h" LANG=C.UTF-8 setpriv --reuid="$uid" --regid="$gid" --init-groups -- bash -c ${q(body)} _ "$h" )
+done`;
+}

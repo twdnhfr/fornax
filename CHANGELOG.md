@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1 — unreleased
+
+- **PHP comes from packages.sury.org instead of the ondrej/php PPA.** Ondřej Surý froze the Launchpad PPA on 2026-11-20 and changed its Label to "PPA for PHP (deprecated)": since then every `apt-get update` on a server with the PPA fails until the change is accepted, and the PPA gets no more PHP releases (8.5.13, 8.4.28 and 8.3.37 are its last). The next plan removes `/etc/apt/sources.list.d/ondrej-php.list` and its keyring as its first steps — before anything that runs `apt-get update` — and writes `sury-php.list` with sury's key (fingerprint `15058500A0235D97F5D10063B188E2B695BD4743`). Installed PHP packages stay as they are and take their next update from the new repository; their version strings (`+debsuryorg24.04.1+1`) can sort lower than the PPA's, so a build of the same revision is not replaced until a newer one arrives. packages.sury.org also serves Ubuntu 26.04: several PHP versions side by side work there now, not only the system's 8.5. `server convert` counts sury's own `php.list` as the PHP repo, like the PPA.
+
 ## 1.2.0 — 2026-11-18
 
 - **Security: root no longer acts on a site user's paths.** `absent` (a site's `files` when it is removed, `retire`) looks and deletes as the user whose home holds the path — before, a user could swap a directory on the way for a symlink and have root delete a file elsewhere. A configured file in a home must belong to that home's user and group (`config_invalid` otherwise — the user cannot hand a file to another group, so such an owner never converged), and root refuses to write or delete any path that leads into a home through a symlink.

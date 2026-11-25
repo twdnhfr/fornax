@@ -14,12 +14,12 @@ import { PHP_INI_DEFAULTS } from "../modules/server.ts";
 
 /** The apt repos each module writes a source file for (`/etc/apt/sources.list.d/<name>.list`). */
 const MODULE_REPOS: Record<string, string[]> = { access: ["tailscale"], security: ["crowdsec"], web: ["nginx"], php: ["php", "node"], data: ["redis"] };
-/** The same repo under any channel or mirror (packagecloud's /ubuntu/ noble next to /any/ any, ondrej/php from a mirror). */
+/** The same repo under any channel or mirror (packagecloud's /ubuntu/ noble next to /any/ any, PHP from the old ondrej/php PPA, a mirror of it, or sury's own `php.list`). */
 const REPO_MATCH: Record<string, RegExp> = {
   tailscale: /\/\/pkgs\.tailscale\.com\//,
   crowdsec: /\/\/packagecloud\.io\/crowdsec\/crowdsec\//,
   nginx: /\/\/nginx\.org\/packages\//,
-  php: /\/ondrej\/php(\/|$)/,
+  php: /\/ondrej\/php(\/|$)|\/\/packages\.sury\.org\/php(\/|$)/,
   node: /\/\/deb\.nodesource\.com\//,
   redis: /\/\/packages\.redis\.io\//,
 };

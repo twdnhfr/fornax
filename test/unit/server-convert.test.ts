@@ -73,6 +73,13 @@ describe("apt sources", () => {
     expect(r(["php"])).toEqual(["/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources"]);
     expect(r(["data"])).toBeUndefined();
   });
+  test("sury's own php.list from its README counts as the PHP repo too", () => {
+    const other = { ...forge, aptSources: [{ path: "/etc/apt/sources.list.d/php.list", url: "https://packages.sury.org/php/" }] };
+
+    const set = Object.fromEntries(planConversion(fleet, server, other, ["php"]).set.map(([p, v]) => [p.join("."), v]));
+
+    expect(set.retire).toEqual(["/etc/apt/sources.list.d/php.list"]);
+  });
 });
 
 describe("review fixes", () => {

@@ -17,7 +17,7 @@ import { downloadRelease } from "../core/update.ts";
 import { VERSION } from "../core/version.ts";
 import { notice } from "../core/notice.ts";
 import { DISTROS, SUPPORTED_UBUNTU, type ModuleCtx } from "./common.ts";
-import { SERVER_MODULES, serverFiles, serverRetire } from "./server.ts";
+import { retirePhpPpa, SERVER_MODULES, serverFiles, serverRetire } from "./server.ts";
 import { siteResources, deployResources } from "./site.ts";
 import { detachResources } from "../forge/detach.ts";
 import { LEGACY_GONE, legacyEarly, legacyLate } from "./legacy.ts";
@@ -87,7 +87,7 @@ async function binaryFor(arch: "arm64" | "x86_64", current: string | undefined, 
 export async function preflight(fleet: Fleet, server: Server): Promise<ModuleCtx["facts"]> {
   const out = await runnerFor(fleet, server).run(`${FACT_FN}
 . /etc/os-release; fact id "$ID"; fact codename "$VERSION_CODENAME"; fact version "$VERSION_ID"; fact arch "$(uname -m)"
-case "$VERSION_CODENAME" in noble) fact php_ppa yes;; *) curl -fsI --max-time 10 "https://ppa.launchpadcontent.net/ondrej/php/ubuntu/dists/$VERSION_CODENAME/Release" >/dev/null 2>&1 && fact php_ppa yes || fact php_ppa no;; esac
+case "$VERSION_CODENAME" in noble|resolute) fact php_repo yes;; *) curl -fsI --max-time 10 "https://packages.sury.org/php/dists/$VERSION_CODENAME/Release" >/dev/null 2>&1 && fact php_repo yes || fact php_repo no;; esac
 ${LEGACY_GONE} || fact legacy yes
 id -u anvil >/dev/null 2>&1 && ! id -u fornax >/dev/null 2>&1 && fact legacy_admin yes
 ${PROVISIONED} && fact provisioned yes
@@ -100,12 +100,12 @@ true`);
   }
   const arch = one(f, "arch") === "aarch64" ? "arm64" : "x86_64";
   if (server.arch && server.arch !== arch) fail("config_invalid", `${server.server}: config says arch ${server.arch}, the server is ${arch}`);
-  const phpPpa = one(f, "php_ppa") === "yes";
+  const phpRepo = one(f, "php_repo") === "yes";
   const systemPhp = DISTROS[version]!.systemPhp;
-  if (!phpPpa && server.modules.includes("php") && server.php.some((v) => v !== systemPhp)) {
+  if (!phpRepo && server.modules.includes("php") && server.php.some((v) => v !== systemPhp)) {
     fail(
       "config_invalid",
-      `${server.server} runs Ubuntu ${version}, where only PHP ${systemPhp} is available (the ondrej/php PPA does not support ${one(f, "codename")} yet)`,
+      `${server.server} runs Ubuntu ${version}, where only PHP ${systemPhp} is available (packages.sury.org/php does not serve ${one(f, "codename")} yet)`,
       `set php: ["${systemPhp}"] for this server, or use Ubuntu 24.04 for other versions`,
     );
   }
@@ -131,7 +131,7 @@ true`);
     const listed = Bun.spawnSync(["ssh-add", "-L"], { env: { ...process.env, SSH_AUTH_SOCK: await agent }, stdout: "pipe" }).stdout.toString();
     fleetKey = listed.split("\n").find((l) => l.startsWith("ssh-"))?.split(/\s+/).slice(0, 2).join(" ");
   }
-  return { arch, codename: one(f, "codename")!, version, phpPpa, binary, heartbeat, ntfyToken, composerAuth, fleetKey, legacy: one(f, "legacy") === "yes", legacyAdmin: one(f, "legacy_admin") === "yes", provisioned: one(f, "provisioned") === "yes" };
+  return { arch, codename: one(f, "codename")!, version, phpRepo, binary, heartbeat, ntfyToken, composerAuth, fleetKey, legacy: one(f, "legacy") === "yes", legacyAdmin: one(f, "legacy_admin") === "yes", provisioned: one(f, "provisioned") === "yes" };
 }
 
 /**
@@ -149,7 +149,7 @@ export function desired(fleet: Fleet, server: Server, facts: ModuleCtx["facts"],
   }
   // /etc in git first: everything after it is part of the server's history (full plans and bootstrap)
   const withHistory = !scope?.sites?.length && (!scope?.modules?.length || scope.modules.includes("base"));
-  const r: Resource[] = [pendingHandlers(), ...legacyEarly(ctx), ...(withHistory ? [...historyResources(ctx), ...rootAccessResources(ctx)] : [])];
+  const r: Resource[] = [pendingHandlers(), ...(scope?.sites?.length ? [] : retirePhpPpa(ctx, wantModules)), ...legacyEarly(ctx), ...(withHistory ? [...historyResources(ctx), ...rootAccessResources(ctx)] : [])];
   // taken-over files fornax's own replace go first: removed in the same apply, before the reload that checks both
   if (!scope?.sites?.length) r.push(...serverRetire(ctx));
   for (const m of MODULES) {

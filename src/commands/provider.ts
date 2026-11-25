@@ -127,7 +127,7 @@ defineCommand({
     size: { type: "string", help: "server type / size slug (see `fornax provider catalog`)" },
     location: { type: "string", help: "location / region" },
     php: { type: "list", help: "PHP versions (default: 8.4 on 24.04, 8.5 on 26.04)" },
-    ubuntu: { type: "string", help: "Ubuntu LTS: 24.04 or 26.04 (26.04 has only PHP 8.5 until the ondrej PPA supports it)", default: "24.04" },
+    ubuntu: { type: "string", help: "Ubuntu LTS: 24.04 or 26.04", default: "24.04" },
     "authorized-key": { type: "string", help: "extra public key file for root (the fleet key ssh.key, or ssh.identity_file + .pub, and ssh.authorized_keys are always given)" },
     "no-provision": { type: "boolean", help: "stop once the server is reachable (then: fornax server bootstrap / provision)" },
     ...applyOptions,

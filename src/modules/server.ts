@@ -2,10 +2,20 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { absent, check, dir, file, packages, service, symlink, type Resource } from "../core/resource.ts";
 import { q } from "../core/shell.ts";
-import { aptRepo, configFiles, DISTROS, HEADER, REPOS, SECRETS, type ModuleCtx } from "./common.ts";
+import { aptRepo, configFiles, DISTROS, HEADER, REPOS, RETIRED_PHP_PPA, SECRETS, type ModuleCtx } from "./common.ts";
 import { rootKeys } from "./root-access.ts";
 
 const H = `# ${HEADER}\n`;
+
+/**
+ * fornax's old ondrej/php PPA files, removed at the very start of a plan, before etckeeper's and every
+ * other package step: while they are there, each `apt-get update` fails on the PPA's changed Label.
+ */
+export function retirePhpPpa(ctx: ModuleCtx, wantModules: readonly string[]): Resource[] {
+  const owner = ["base", "php"].find((m) => (ctx.server.modules as readonly string[]).includes(m) && wantModules.includes(m));
+  if (!owner) return [];
+  return RETIRED_PHP_PPA.map((path) => absent(path, { owner, handler: "apt", summary: `remove ${path} (the ondrej/php PPA is frozen, PHP comes from packages.sury.org)` }));
+}
 
 // ---- base ----------------------------------------------------------------------
 
@@ -363,8 +373,8 @@ export function php(ctx: ModuleCtx): Resource[] {
   const o = { owner: "php" };
   // "8.5:imagick" installs an extension for one version only
   const extsFor = (v: string) => [...PHP_EXTENSIONS, ...s.php_extensions.flatMap((e) => (e.includes(":") ? (e.split(":")[0] === v ? [e.split(":")[1]!] : []) : [e]))];
-  // Without the PPA (new Ubuntu releases) the distribution's own PHP is used.
-  const r: Resource[] = ctx.facts.phpPpa ? [...aptRepo(ctx, REPOS.php!, "php")] : [];
+  // Where packages.sury.org does not serve the Ubuntu release, the distribution's own PHP is used.
+  const r: Resource[] = ctx.facts.phpRepo ? [...aptRepo(ctx, REPOS.php!, "php")] : [];
   for (const v of s.php) {
     // From 8.5 on OPcache is part of the core build and has no package of its own.
     const exts = extsFor(v);

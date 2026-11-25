@@ -10,7 +10,7 @@ import { nodeSlots, siteRuntime } from "../../src/core/runtime.ts";
 import { desired } from "../../src/modules/index.ts";
 import { nodeUnitConf, vhostConf } from "../../src/modules/site.ts";
 
-const facts = { arch: "arm64" as const, codename: "noble", version: "24.04", phpPpa: true };
+const facts = { arch: "arm64" as const, codename: "noble", version: "24.04", phpRepo: true };
 
 function fleet(server: string, snippets: Record<string, string> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), "fornax-node-"));

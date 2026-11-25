@@ -25,7 +25,7 @@ const MINE = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMineMineMineMineMineMineMineM
 const fleet = loadFleet({ cwd: join(import.meta.dir, "..", "..", "examples", "fleet") });
 const server = fleet.servers.get("web-1")!;
 const docs = resolveSite(fleet, server, "docs.example.com");
-const ctx = { fleet, server, sites: sites(fleet, server), facts: { arch: "arm64", codename: "noble", version: "24.04", phpPpa: true, binary: { keep: false } }, admin: "fornax" } as never;
+const ctx = { fleet, server, sites: sites(fleet, server), facts: { arch: "arm64", codename: "noble", version: "24.04", phpRepo: true, binary: { keep: false } }, admin: "fornax" } as never;
 const deployKey = deploySiteResources(ctx, docs).find((r) => r.id === `check:deploy-key:${docs.domain}`)!;
 const detach = detachResources({ server: { ...server, forge_detach: { ufw_ssh_ips: [] }, files: [] } } as never)[0]!;
 

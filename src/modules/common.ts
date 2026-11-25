@@ -20,8 +20,8 @@ export interface Facts {
   codename: string;
   /** Ubuntu version, e.g. "24.04". */
   version: string;
-  /** Whether the ondrej/php PPA serves this Ubuntu release (several PHP versions side by side). */
-  phpPpa: boolean;
+  /** Whether packages.sury.org/php serves this Ubuntu release (several PHP versions side by side). */
+  phpRepo: boolean;
   /** keep: the server's own binary, left as it is (a peer host without a build for its architecture). */
   binary?: { path: string; sha: string; build?: string; keep?: boolean };
   /** Backup heartbeat URL resolved for this plan (value stays in memory, only its hash is planned). */
@@ -87,11 +87,13 @@ export const REPOS: Record<string, AptRepo> = {
     key: "https://nginx.org/keys/nginx_signing.key",
     line: (k, c) => `deb [signed-by=${k}] https://nginx.org/packages/mainline/ubuntu ${c} nginx`,
   },
+  // Ondřej Surý's own repository; the ondrej/php PPA on Launchpad is frozen since 2026-11-20
   php: {
-    name: "ondrej-php",
-    fingerprints: ["14AA40EC0831756756D7F66C4F4EA0AAE5267A6C"],
-    key: "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x14AA40EC0831756756D7F66C4F4EA0AAE5267A6C",
-    line: (k, c) => `deb [signed-by=${k}] https://ppa.launchpadcontent.net/ondrej/php/ubuntu ${c} main`,
+    name: "sury-php",
+    fingerprints: ["15058500A0235D97F5D10063B188E2B695BD4743"],
+    key: "https://packages.sury.org/php/apt.gpg",
+    binaryKey: true,
+    line: (k, c) => `deb [signed-by=${k}] https://packages.sury.org/php/ ${c} main`,
   },
   node: {
     name: "nodesource",
@@ -127,6 +129,12 @@ export const REPOS: Record<string, AptRepo> = {
     line: (k, c) => `deb [signed-by=${k}] https://pkgs.tailscale.com/stable/ubuntu ${c} main`,
   },
 };
+
+/**
+ * What fornax wrote for the ondrej/php PPA before PHP moved to packages.sury.org. The PPA is frozen,
+ * and its changed Label makes every `apt-get update` fail until the source is gone.
+ */
+export const RETIRED_PHP_PPA = ["/etc/apt/sources.list.d/ondrej-php.list", "/etc/apt/keyrings/ondrej-php.gpg"];
 
 /** Shell expression: the primary-key fingerprints in a key file (armored or binary), sorted, space-separated. */
 const keyFingerprints = (path: string) =>

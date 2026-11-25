@@ -581,7 +581,7 @@ Server-level modules fornax manages. Adopted servers start with [].
 
 list of strings matching `^\d\.\d$` · default `["8.4"]`
 
-PHP versions installed side by side, each with its own FPM service, e.g. ["8.3", "8.4"]. Where the ondrej/php PPA does not serve the Ubuntu release, only the system's PHP is possible.
+PHP versions installed side by side, each with its own FPM service, e.g. ["8.3", "8.4"], from packages.sury.org/php. Where it does not serve the Ubuntu release, only the system's PHP is possible.
 
 ### `php_default`
 

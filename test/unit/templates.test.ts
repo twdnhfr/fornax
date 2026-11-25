@@ -13,7 +13,7 @@ const fleet = loadFleet({ cwd: join(import.meta.dir, "..", "..", "examples", "fl
 const server = fleet.servers.get("web-1")!;
 const shop = resolveSite(fleet, server, "shop.example.com");
 const docs = resolveSite(fleet, server, "docs.example.com");
-const ctx = { fleet, server, sites: sites(fleet, server), facts: { arch: "arm64" as const, codename: "noble", version: "24.04", phpPpa: true }, admin: "fornax" };
+const ctx = { fleet, server, sites: sites(fleet, server), facts: { arch: "arm64" as const, codename: "noble", version: "24.04", phpRepo: true }, admin: "fornax" };
 
 describe("example fleet", () => {
   test("loads and resolves", () => {
@@ -167,6 +167,39 @@ describe("apt keys", () => {
     expect(key!.probe).toContain("'573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 8540A6F18833A80E9C1653A42FD21310B49F6B46 9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3'");
     expect(key!.apply).toContain("apt key for nginx: expected");
     for (const repo of Object.values(REPOS)) expect(repo.fingerprints.every((f) => /^[0-9A-F]{40}$/.test(f))).toBe(true);
+  });
+});
+
+describe("php source", () => {
+  const PPA_LIST = "absent:/etc/apt/sources.list.d/ondrej-php.list";
+  const PPA_KEY = "absent:/etc/apt/keyrings/ondrej-php.gpg";
+
+  test("PHP comes from packages.sury.org; the frozen PPA goes before any package step, etckeeper's too", () => {
+    const r = desired(fleet, server, ctx.facts);
+    const ids = r.map((x) => x.id);
+    const source = r.find((x) => x.id === "file:/etc/apt/sources.list.d/sury-php.list");
+
+    expect(source?.content).toContain("deb [signed-by=/etc/apt/keyrings/sury-php.gpg] https://packages.sury.org/php/ noble main");
+    expect(r.find((x) => x.id === "check:apt-key:sury-php")?.probe).toContain("'15058500A0235D97F5D10063B188E2B695BD4743'");
+    expect(r.filter((x) => x.id === PPA_LIST || x.id === PPA_KEY).map((x) => [x.owner, x.handler])).toEqual([["base", "apt"], ["base", "apt"]]);
+    const firstPackages = ids.findIndex((id) => id.startsWith("packages:"));
+    expect(ids.indexOf(PPA_LIST)).toBeLessThan(firstPackages);
+    expect(ids.indexOf(PPA_LIST)).toBeLessThan(ids.indexOf("file:/etc/apt/sources.list.d/sury-php.list"));
+  });
+
+  test("without the base module the php module retires the PPA itself", () => {
+    const noBase = { ...server, modules: server.modules.filter((m) => m !== "base") };
+
+    const r = desired(fleet, noBase, ctx.facts);
+
+    expect(r.filter((x) => x.id === PPA_LIST || x.id === PPA_KEY).map((x) => x.owner)).toEqual(["php", "php"]);
+  });
+
+  test("where packages.sury.org does not serve the release, no PHP source is written but the PPA still goes", () => {
+    const ids = desired(fleet, server, { ...ctx.facts, phpRepo: false }).map((x) => x.id);
+
+    expect(ids).not.toContain("file:/etc/apt/sources.list.d/sury-php.list");
+    expect(ids).toContain(PPA_LIST);
   });
 });
 

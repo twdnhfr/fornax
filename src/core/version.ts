@@ -1,4 +1,4 @@
-export const VERSION = "1.2.0";
+export const VERSION = "1.2.1";
 
 declare const FORNAX_BUILD: string | undefined;
 
